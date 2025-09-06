@@ -1,0 +1,60 @@
+<!-- PLAYER MORALE & TEAM CHEMISTRY ADD-ON -->
+<script>
+(function(){
+  if(!window.teams) return;
+
+  // Initialize morale & chemistry
+  function initMorale(){
+    teams.forEach(team => {
+      team.roster.forEach(player => {
+        if(player.morale === undefined) player.morale = 80 + Math.floor(Math.random() * 20); // 80–99 start
+      });
+      // team chemistry = average of all players morale
+      team.chemistry = Math.round(team.roster.reduce((sum,p)=>sum+p.morale,0)/team.roster.length);
+    });
+    console.log('🎯 Player morale & team chemistry initialized.');
+  }
+
+  // Adjust morale based on events
+  function adjustMorale(player, delta){
+    player.morale = clamp(player.morale + delta, 0, 100);
+    // update team chemistry
+    const team = teams.find(t => t.roster.includes(player));
+    if(team){
+      team.chemistry = Math.round(team.roster.reduce((sum,p)=>sum+p.morale,0)/team.roster.length);
+    }
+  }
+
+  // Example event hooks
+  function onGoal(player){ adjustMorale(player, +5); }
+  function onMissedPass(player){ adjustMorale(player, -3); }
+  function onSuccessfulTackle(player){ adjustMorale(player, +2); }
+  function onFoul(player){ adjustMorale(player, -4); }
+
+  // Apply morale influence on actions
+  function moraleModifier(player){
+    return clamp(player.morale/100, 0.7, 1.2); // 0.7x to 1.2x effect
+  }
+
+  // Example: modify throw accuracy using morale & team chemistry
+  function modifyThrowAccuracy(baseAccuracy, qb){
+    const team = teams.find(t=>t.roster.includes(qb));
+    const teamChem = team ? team.chemistry/100 : 1;
+    const mod = moraleModifier(qb) * teamChem;
+    return clamp(baseAccuracy * mod, 0, 1);
+  }
+
+  // Expose globally
+  window.ufsInitMorale = initMorale;
+  window.ufsAdjustMorale = adjustMorale;
+  window.ufsMoraleModifier = moraleModifier;
+  window.ufsModifyThrowAccuracy = modifyThrowAccuracy;
+  window.ufsGoalEvent = onGoal;
+  window.ufsMissedPassEvent = onMissedPass;
+  window.ufsSuccessfulTackleEvent = onSuccessfulTackle;
+  window.ufsFoulEvent = onFoul;
+
+  // Initialize automatically
+  initMorale();
+})();
+</script>
