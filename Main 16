@@ -1,0 +1,112 @@
+<script>
+/* ==========================================================================
+   Sound Effects Add-On for Ultimate Football Simulator
+   - Adds audio for all major in-game events
+   - Compatible with existing gameplay, throws, runs, kicks, AI plays, etc.
+   ========================================================================== */
+
+const sounds = {
+  pass: new Audio("https://freesound.org/data/previews/522/522015_6244028-lq.mp3"),
+  catch: new Audio("https://freesound.org/data/previews/146/146725_2394240-lq.mp3"),
+  incomplete: new Audio("https://freesound.org/data/previews/58/58362_634166-lq.mp3"),
+  interception: new Audio("https://freesound.org/data/previews/33/33824_17694-lq.mp3"),
+  run: new Audio("https://freesound.org/data/previews/170/170144_2394240-lq.mp3"),
+  touchdown: new Audio("https://freesound.org/data/previews/341/341695_3248244-lq.mp3"),
+  sack: new Audio("https://freesound.org/data/previews/93/93210_1022656-lq.mp3"),
+  fieldgoal_good: new Audio("https://freesound.org/data/previews/501/501166_939565-lq.mp3"),
+  fieldgoal_miss: new Audio("https://freesound.org/data/previews/250/250629_4779858-lq.mp3"),
+  punt: new Audio("https://freesound.org/data/previews/215/215837_2079602-lq.mp3"),
+  crowd: new Audio("https://freesound.org/data/previews/514/514654_931203-lq.mp3"),
+  button_click: new Audio("https://freesound.org/data/previews/219/219021_4102073-lq.mp3")
+};
+
+/* Loop crowd ambient */
+sounds.crowd.loop = true;
+sounds.crowd.volume = 0.25;
+sounds.crowd.play().catch(()=>{}); // catch error if autoplay blocked
+
+/* Helper to play sounds safely */
+function playSound(name){
+  if(sounds[name]){
+    sounds[name].currentTime = 0;
+    sounds[name].play().catch(()=>{}); 
+  }
+}
+
+/* ---------------------------
+   Hook into existing events
+   --------------------------- */
+
+/* Throws */
+const origReleaseCharge = releaseChargeAndThrow;
+releaseChargeAndThrow = function(){
+  origReleaseCharge();
+  if(currentPlay && currentPlay.ball){
+    playSound('pass');
+  }
+};
+
+/* Catch / incomplete handled inside ball landing logic */
+const origDrawBallLanding = drawPlayersOnCanvas;
+drawPlayersOnCanvas = function(playPositionsArg, selectedReceiverIdArg){
+  origDrawBallLanding(playPositionsArg, selectedReceiverIdArg);
+  if(currentPlay && currentPlay.state === "ball_in_air" && currentPlay.ball === null){
+    if(currentPlay.lastEvent){
+      switch(currentPlay.lastEvent){
+        case 'catch': playSound('catch'); break;
+        case 'incomplete': playSound('incomplete'); break;
+        case 'interception': playSound('interception'); break;
+      }
+      currentPlay.lastEvent = null;
+    }
+  }
+};
+
+/* Overwrite applyYardsToHud to trigger run, touchdown, and sack sounds */
+const origApplyYards = applyYardsToHud;
+applyYardsToHud = function(yards, offenseTeam, defenseTeam, type){
+  origApplyYards(yards, offenseTeam, defenseTeam, type);
+  switch(type){
+    case 'run': playSound('run'); break;
+    case 'td': playSound('touchdown'); break;
+    case 'sack': playSound('sack'); break;
+  }
+};
+
+/* Overwrite applyTurnover to trigger interception sound */
+const origApplyTurnover = applyTurnover;
+applyTurnover = function(offTeam, defTeam, reason){
+  if(reason === 'interception') playSound('interception');
+  origApplyTurnover(offTeam, defTeam, reason);
+};
+
+/* Overwrite kick release to play FG or punt sounds */
+const origReleaseKick = releaseKickCharge;
+releaseKickCharge = function(){
+  const beforeBallPos = hud.ballPos;
+  origReleaseKick();
+  if(hud.ballPos > beforeBallPos){ // kicked successfully
+    if(kickControls.classList.contains('hidden')){ // field goal attempt finished
+      if(hud.scoreA > 0){ playSound('fieldgoal_good'); } else { playSound('fieldgoal_miss'); }
+    } else { playSound('punt'); }
+  }
+};
+
+/* Button click sounds */
+[startPlayBtn, runBtn, throwBtn, goForItBtn, fieldGoalBtn, puntBtn, kickBtn].forEach(btn=>{
+  btn.addEventListener('click', ()=>playSound('button_click'));
+});
+
+/* Extra: play small throw charge tick sound (optional, subtle) */
+let lastChargePct = 0;
+setInterval(()=>{
+  if(isCharging){
+    const pct = meterFill;
+    if(pct - lastChargePct >= 0.2){
+      lastChargePct = pct;
+      playSound('button_click'); // subtle tick for charge
+    }
+  } else { lastChargePct = 0; }
+}, 150);
+
+</script>
