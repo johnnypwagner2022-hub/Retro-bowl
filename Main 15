@@ -1,0 +1,67 @@
+// Play-by-Play Commentary Add-On
+function addCommentary(eventType, player=null, yards=null){
+    let phrases = [];
+    switch(eventType){
+        case 'run':
+            phrases = [
+                `${player.name} rushes for ${yards} yards.`,
+                `${player.name} powers through the line for ${yards} yards.`,
+                `${player.name} finds a gap and gains ${yards} yards.`
+            ];
+            break;
+        case 'pass_complete':
+            phrases = [
+                `${player.name} makes the catch for ${yards} yards!`,
+                `Nice throw to ${player.name}, picking up ${yards} yards.`,
+                `${player.name} hauls it in for ${yards} yards.`
+            ];
+            break;
+        case 'pass_incomplete':
+            phrases = [
+                `Pass intended for ${player.name} is incomplete.`,
+                `${player.name} couldn't secure the pass.`,
+                `Incomplete! ${player.name} just missed.`
+            ];
+            break;
+        case 'touchdown':
+            phrases = [
+                `TOUCHDOWN! ${player.name} scores!`,
+                `${player.name} finds the endzone!`,
+                `What a play! ${player.name} puts points on the board!`
+            ];
+            break;
+        case 'sack':
+            phrases = [
+                `${player.name} is sacked!`,
+                `Pressure applied! ${player.name} goes down.`,
+                `Big loss on the play for ${player.name}.`
+            ];
+            break;
+        case 'interception':
+            phrases = [
+                `${player.name} intercepts the pass!`,
+                `Turnover! ${player.name} picks it off.`,
+                `Defense strikes! ${player.name} with the interception.`
+            ];
+            break;
+        case 'field_goal':
+            phrases = [
+                `Field goal attempt by ${player.name} is good!`,
+                `${player.name} splits the uprights!`,
+                `Three points for ${player.name}!`
+            ];
+            break;
+        case 'field_goal_miss':
+            phrases = [
+                `${player.name} misses the field goal!`,
+                `No good! ${player.name} couldn't make it.`,
+                `Close, but ${player.name} misses the kick.`
+            ];
+            break;
+    }
+
+    if(phrases.length > 0){
+        const comment = phrases[Math.floor(Math.random() * phrases.length)];
+        log(`<em>${comment}</em>`);
+    }
+}
