@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Mini Football Simulator</title>
+<style>
+body { font-family: Arial, sans-serif; background: #0b3d91; color: #fff; }
+.container { max-width: 800px; margin: auto; padding: 20px; background: #1a1a1a; border-radius: 8px; }
+button { padding: 10px 20px; margin: 10px; font-size: 16px; }
+.team { margin-bottom: 20px; }
+.player { font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="container">
+<h1>Mini Football Simulator</h1>
+
+<div id="teamContainer"></div>
+
+<button onclick="simulateSeason()">Simulate Season</button>
+<div id="results"></div>
+</div>
+
+<script>
+// Sample NFL teams
+const teams = [
+  { name: "Patriots", players: [] },
+  { name: "Cowboys", players: [] },
+  { name: "Packers", players: [] },
+  { name: "Chiefs", players: [] }
+];
+
+// Generate players with random skills
+const playerNames = ["Tom", "Aaron", "Patrick", "Dak", "Julio", "Travis", "Davante", "Derrick"];
+function generatePlayers() {
+  teams.forEach(team => {
+    team.players = [];
+    for (let i = 0; i < 11; i++) {
+      const name = playerNames[Math.floor(Math.random() * playerNames.length)];
+      const skill = Math.floor(Math.random() * 100) + 1; // 1-100 skill
+      team.players.push({ name, skill });
+    }
+  });
+}
+
+// Display teams
+function displayTeams() {
+  const container = document.getElementById("teamContainer");
+  container.innerHTML = "";
+  teams.forEach(team => {
+    const div = document.createElement("div");
+    div.className = "team";
+    div.innerHTML = `<h2>${team.name}</h2>` + 
+      team.players.map(p => `<div class="player">${p.name} (Skill: ${p.skill})</div>`).join("");
+    container.appendChild(div);
+  });
+}
+
+// Simulate a match between two teams
+function simulateMatch(teamA, teamB) {
+  const scoreA = teamA.players.reduce((a,p)=>a+p.skill,0) + Math.floor(Math.random()*20);
+  const scoreB = teamB.players.reduce((a,p)=>a+p.skill,0) + Math.floor(Math.random()*20);
+  return { teamA, teamB, scoreA, scoreB };
+}
+
+// Simulate a season
+function simulateSeason() {
+  generatePlayers();
+  displayTeams();
+
+  const resultsDiv = document.getElementById("results");
+  resultsDiv.innerHTML = "<h2>Season Results</h2>";
+
+  for (let i=0; i<teams.length; i++) {
+    for (let j=i+1; j<teams.length; j++) {
+      const match = simulateMatch(teams[i], teams[j]);
+      resultsDiv.innerHTML += `<p>${match.teamA.name} ${match.scoreA} - ${match.scoreB} ${match.teamB.name}</p>`;
+    }
+  }
+
+  // Draft, retire, and trades could be added here
+}
+
+generatePlayers();
+displayTeams();
+</script>
+</body>
+</html>
