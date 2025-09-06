@@ -1,0 +1,152 @@
+<!-- ROSTER IMPORT ADD-ON: paste this AFTER your main <script> block but before </body> -->
+<script>
+/* === ROSTER IMPORT ADD-ON (Real 2025 rosters) ===
+   Usage:
+   - Click "Upload Rosters JSON" and pick a local file (array of team objects).
+   - Or click "Try fetch community JSON" to attempt downloading a public JSON (CORS permitting).
+   - The loader will validate and replace `teams`, then call populateTeamSelect() so your UI updates.
+*/
+
+(function(){
+  // create UI controls and insert into page
+  const container = document.querySelector('.container') || document.body;
+  const wrap = document.createElement('div');
+  wrap.style.margin = "12px 0";
+  wrap.innerHTML = `
+    <div style="background:#071024;padding:10px;border-radius:6px;color:#dbeafe">
+      <strong>Roster Import (2025)</strong>
+      <div style="margin-top:8px;">
+        <input id="rosterFileInput" type="file" accept=".json" />
+        <button id="rosterLoadBtn" style="margin-left:8px;padding:6px 10px;">Load uploaded JSON</button>
+        <button id="rosterFetchBtn" style="margin-left:8px;padding:6px 10px;">Try fetch community JSON</button>
+      </div>
+      <div style="font-size:13px;color:#bcd;margin-top:8px;">
+        Tip: many community JSONs exist (Football GM / community packs). If fetch fails due to CORS, download JSON locally and upload it.
+      </div>
+      <div id="rosterImportLog" style="margin-top:8px;font-size:13px;color:#9fe3ff"></div>
+    </div>
+  `;
+  container.insertBefore(wrap, container.firstChild);
+
+  const fileInput = document.getElementById('rosterFileInput');
+  const loadBtn = document.getElementById('rosterLoadBtn');
+  const fetchBtn = document.getElementById('rosterFetchBtn');
+  const importLog = document.getElementById('rosterImportLog');
+
+  function ijlog(msg){ importLog.innerHTML = msg + '<br/>' + importLog.innerHTML; }
+
+  // Basic schema validator/normalizer
+  function normalizeAndValidateRosterArray(data){
+    if(!Array.isArray(data)) throw new Error('Roster file must be an array of team objects.');
+    const normalized = data.map(team=>{
+      if(!team.name) throw new Error('Each team needs a name property.');
+      const roster = Array.isArray(team.roster) ? team.roster.map(p=>{
+        // ensure required fields
+        const name = p.name || ( (p.first||'') + ' ' + (p.last||'') ).trim() || 'Unknown Player';
+        const position = p.position || p.pos || 'RB';
+        const skill = Number.isFinite(p.skill) ? p.skill : (p.rating || 60);
+        const potential = Number.isFinite(p.potential) ? p.potential : Math.min(99, skill + 5);
+        const id = p.id || (Math.random().toString(36).slice(2));
+        // keep existing extra fields if present (injury/stats)
+        const out = { name, position, skill: clamp(skill, 1, 99), potential: clamp(potential, 1, 99), id };
+        if(p.stats) out.stats = p.stats;
+        return out;
+      }) : [];
+      return { name: team.name, roster, wins: team.wins||0, losses: team.losses||0 };
+    });
+    return normalized;
+  }
+
+  // Replace global teams and refresh UI
+  function applyRosters(normalizedTeams){
+    window.teams = normalizedTeams;
+    // call existing UI functions if present
+    if(typeof populateTeamSelect === 'function') populateTeamSelect();
+    if(typeof displayTeamList === 'function') displayTeamList();
+    if(typeof refreshHUD === 'function') refreshHUD();
+    if(typeof initAll === 'function') { /* don't re-init whole game; just update simSummary */ }
+    if(typeof simSummary !== 'undefined') {
+      const el = document.getElementById('simSummary') || document.getElementById('rosterImportLog');
+      if(el) el.innerHTML = `Loaded ${normalizedTeams.length} teams from roster import.`;
+    }
+    ijlog(`✅ Rosters loaded (${normalizedTeams.length} teams).`);
+    if(typeof log === 'function') log('✅ Rosters imported and applied.');
+  }
+
+  // file loader
+  loadBtn.addEventListener('click', ()=>{
+    const f = fileInput.files[0];
+    if(!f){ ijlog('No file selected.'); return; }
+    const reader = new FileReader();
+    reader.onload = function(e){
+      try{
+        const json = JSON.parse(e.target.result);
+        const normalized = normalizeAndValidateRosterArray(json);
+        applyRosters(normalized);
+      }catch(err){
+        ijlog('Error parsing roster JSON: ' + err.message);
+      }
+    };
+    reader.onerror = ()=> ijlog('Error reading file.');
+    reader.readAsText(f);
+  });
+
+  // try to fetch a community JSON (CORS may block)
+  fetchBtn.addEventListener('click', async ()=>{
+    // example community JSONs (may change over time) — if you have a specific URL replace below
+    const candidateUrls = [
+      // Community Football GM roster shared on Reddit (example discovered publicly). CORS may block direct fetch.
+      'https://dl.dropbox.com/scl/fi/rgvlf2afh1xjofd9rtsxk/FBGM_NFL_Roster_24_25_2025_before_draft.json?rlkey=9uddou2fu413vh6azwtk0jc9o&dl=1',
+      // Alternate community source (if available)
+      'https://dl.dropboxusercontent.com/s/ngk4usf6vz27zk6hxwyxd/FBGM_NFL_Revamped_2024_free_agency_1.json'
+    ];
+    ijlog('Attempting fetch of community JSONs (CORS permitting)...');
+    for(const url of candidateUrls){
+      try{
+        const res = await fetch(url, {mode:'cors'});
+        if(!res.ok) { ijlog(`Fetch failed (${res.status}) for ${url}`); continue; }
+        const json = await res.json();
+        const normalized = normalizeAndValidateRosterArray(json);
+        applyRosters(normalized);
+        return;
+      }catch(err){
+        ijlog(`Fetch error for ${url}: ${err.message}`);
+        continue;
+      }
+    }
+    ijlog('All fetch attempts failed (likely CORS or URL moved). Please download a roster JSON and upload it with the file picker.');
+  });
+
+  // small sample JSON for quick testing (1 team). You can paste this into a file and upload.
+  const sample = [
+    {
+      "name":"SampleFC",
+      "roster":[
+        {"name":"John QB","position":"QB","skill":88,"potential":92},
+        {"name":"Jake RB","position":"RB","skill":79,"potential":85},
+        {"name":"Will WR","position":"WR","skill":82,"potential":88},
+        {"name":"Tony OL","position":"OL","skill":76,"potential":80},
+        {"name":"Dan K","position":"K","skill":75,"potential":78}
+      ],
+      "wins":0,"losses":0
+    }
+  ];
+  ijlog('Tip: create a JSON file using the sample provided in the console variable `rosterImportSample` and upload it.');
+  window.rosterImportSample = sample;
+
+  // small helper to validate JSON shape in console and apply it (for advanced users)
+  window.applyRosterJSONtoGame = function(json){
+    try{
+      const normalized = normalizeAndValidateRosterArray(json);
+      applyRosters(normalized);
+      return true;
+    }catch(e){
+      console.error('Roster import error:', e);
+      return false;
+    }
+  };
+
+  ijlog('Roster Import add-on ready.');
+
+})();
+</script>
