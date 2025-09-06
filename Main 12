@@ -1,0 +1,71 @@
+<!-- DYNAMIC MATCH COMMENTARY & STATS ADD-ON -->
+<script>
+(function(){
+  if(!window.teams) return;
+
+  // Initialize stats
+  function initMatchStats(){
+    window.matchStats = {
+      goals: 0,
+      fouls: 0,
+      shots: 0,
+      passes: 0,
+      tackles: 0,
+      commentary: []
+    };
+  }
+
+  // Generate a random commentary
+  function generateCommentary(eventType, player){
+    let msg = '';
+    switch(eventType){
+      case 'goal':
+        msg = `⚽ Goal by ${player.name}! Incredible play!`;
+        window.matchStats.goals++;
+        break;
+      case 'foul':
+        msg = `🚨 Foul by ${player.name}. Watch out!`;
+        window.matchStats.fouls++;
+        break;
+      case 'shot':
+        msg = `${player.name} takes a shot!`;
+        window.matchStats.shots++;
+        break;
+      case 'pass':
+        msg = `${player.name} makes a smart pass.`;
+        window.matchStats.passes++;
+        break;
+      case 'tackle':
+        msg = `${player.name} executes a clean tackle.`;
+        window.matchStats.tackles++;
+        break;
+      default:
+        msg = `${player.name} is in action.`;
+    }
+    window.matchStats.commentary.push(msg);
+    console.log(msg);
+    // Optional: append to match feed in UI
+    const feed = document.querySelector('#match_feed');
+    if(feed){
+      const p = document.createElement('p');
+      p.textContent = msg;
+      feed.appendChild(p);
+      feed.scrollTop = feed.scrollHeight;
+    }
+  }
+
+  // Example hook for match events (replace with your own match logic)
+  function playerAction(player, action){
+    generateCommentary(action, player);
+  }
+
+  // Expose globally
+  window.ufsInitMatchStats = initMatchStats;
+  window.ufsGenerateCommentary = generateCommentary;
+  window.ufsPlayerAction = playerAction;
+
+  // Initialize on load
+  initMatchStats();
+  console.log('🎤 Dynamic Match Commentary & Stats add-on loaded.');
+})();
+</script>
