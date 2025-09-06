@@ -1,0 +1,395 @@
+<!-- PROGRESSION & UPGRADE ADD-ON: paste this AFTER your main <script> block -->
+<script>
+(function(){
+  const STORAGE_KEY = 'ufs_progression_v1';
+
+  /* -------------------------
+     State: coins, player data map
+     ------------------------- */
+  let progression = {
+    coins: 500,              // starting coins for user — changeable
+    players: {},             // map: playerId -> { skill, potential, xp, appliedName }
+    settings: { autoUpgradeOnSeasonEnd: true, upgradeCostPerPoint: 150 }
+  };
+
+  /* -------------------------
+     Helpers
+     ------------------------- */
+  function saveProgress(){
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(progression)); }
+    catch(e){ console.warn('Save failed', e); }
+  }
+  function loadProgress(){
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if(!raw) return;
+      const obj = JSON.parse(raw);
+      progression = Object.assign(progression, obj);
+    } catch(e){ console.warn('Load failed', e); }
+  }
+  function findPlayerByIdOrName(pid, name){
+    // first try exact id in teams
+    if(window.teams){
+      for(const team of teams){
+        for(const p of team.roster){
+          if(p.id && pid && p.id === pid) return p;
+        }
+      }
+      // fallback: find by name if id not found
+      if(name){
+        for(const team of teams){
+          for(const p of team.roster){
+            if(p.name === name) return p;
+          }
+        }
+      }
+    }
+    return null;
+  }
+  function ensurePlayerRecord(p){
+    if(!p || !p.id) return null;
+    if(!progression.players[p.id]){
+      progression.players[p.id] = {
+        skill: p.skill,
+        potential: p.potential || p.potential === 0 ? p.potential : Math.max(p.skill, 65),
+        xp: 0,
+        name: p.name
+      };
+      saveProgress();
+    }
+    return progression.players[p.id];
+  }
+
+  /* -------------------------
+     Apply saved progression into current teams (id-based; name fallback)
+     ------------------------- */
+  function applySavedProgressToTeams(){
+    if(!window.teams) return;
+    let applied = 0;
+    for(const team of teams){
+      for(const p of team.roster){
+        const rec = progression.players[p.id] || (p.name && Object.values(progression.players).find(x=>x.name === p.name));
+        if(rec){
+          // apply absolute skill from saved record, but never exceed potential
+          const newSkill = clamp(rec.skill, 1, rec.potential || p.potential || 99);
+          p.skill = newSkill;
+          if(rec.potential) p.potential = rec.potential;
+          applied++;
+        } else {
+          // register player baseline if missing in saved map
+          progression.players[p.id] = { skill: p.skill, potential: p.potential||p.potential===0 ? p.potential : Math.max(p.skill,65), xp: 0, name: p.name };
+        }
+      }
+    }
+    saveProgress();
+    if(applied) {
+      if(typeof displayTeamList === 'function') displayTeamList();
+      if(typeof populateTeamSelect === 'function') populateTeamSelect();
+    }
+  }
+
+  /* -------------------------
+     XP & coin awarding logic (called after plays)
+     - This will be wired into your applyYardsToHud by wrapping it (non-destructive).
+     ------------------------- */
+  function awardXPToOffense(offTeam, yards, type){
+    if(!offTeam) return;
+    // coins reward for team: every 5 yards = 1 coin
+    const coinsGained = Math.max(0, Math.floor(yards / 5));
+    progression.coins += coinsGained;
+
+    // XP distribution:
+    // - run -> primary RB gets XP = floor(yards/2)
+    // - pass -> QB + best WR get XP
+    // - sack/interception -> involved defenders get small XP (not tracked here)
+    let xpGiven = 0;
+    if(type === 'run'){
+      const rb = offTeam.roster.find(p=>p.position==='RB') || offTeam.roster[0];
+      if(rb){ const rec = ensurePlayerRecord(rb); const xp = Math.max(1, Math.floor(yards/2)); rec.xp += xp; xpGiven += xp; }
+    } else if(type === 'pass'){
+      const qb = offTeam.roster.find(p=>p.position==='QB');
+      const wr = offTeam.roster.filter(p=>p.position==='WR').sort((a,b)=>b.skill-a.skill)[0] || offTeam.roster[0];
+      if(qb){ const r = ensurePlayerRecord(qb); const xp = Math.max(1, Math.floor(yards/3)); r.xp += xp; xpGiven += xp; }
+      if(wr){ const r2 = ensurePlayerRecord(wr); const xp2 = Math.max(1, Math.floor(yards/2)); r2.xp += xp2; xpGiven += xp2; }
+    } else if(type === 'td'){
+      // bonus XP to entire offense small
+      offTeam.roster.slice(0,8).forEach(p=>{ const r=ensurePlayerRecord(p); r.xp += 3; xpGiven += 3; });
+    } else {
+      // generic small XP
+      offTeam.roster.slice(0,3).forEach(p=>{ const r=ensurePlayerRecord(p); r.xp += 1; xpGiven += 1; });
+    }
+
+    saveProgress();
+    // UI refresh if open
+    refreshProgressUI();
+    if(typeof log === 'function') log(`🎖️ Progression: +${coinsGained} coins, +${xpGiven} XP distributed to ${offTeam.name}`);
+  }
+
+  /* -------------------------
+     Wrap applyYardsToHud (if exists) so we call awardXPToOffense
+     Non-destructive: keeps original behavior.
+     ------------------------- */
+  if(typeof window.applyYardsToHud === 'function'){
+    const originalApplyYardsToHud = window.applyYardsToHud;
+    window.applyYardsToHud = function(yards, offenseTeam, defenseTeam, type){
+      try {
+        originalApplyYardsToHud.apply(this, arguments);
+      } finally {
+        try {
+          awardXPToOffense(offenseTeam, yards, type);
+        } catch(e){ console.warn('Progression: awardXP failed', e); }
+      }
+    };
+  } else {
+    // If applyYardsToHud not present now, create a hook to attach later
+    window._ufs_progression_waiting_for_applyYards = true;
+  }
+
+  /* -------------------------
+     Wrap simulateSeason to auto-upgrade after season ends (optional)
+     ------------------------- */
+  function autoUpgradeAfterSeason(){
+    // small chance to auto-increase skill toward potential for a subset
+    let upgrades = 0;
+    Object.keys(progression.players).forEach(pid=>{
+      const rec = progression.players[pid];
+      if(!rec) return;
+      if(rec.skill < rec.potential && Math.random() < 0.35){
+        const inc = randInt(1,3);
+        rec.skill = Math.min(rec.potential, rec.skill + inc);
+        upgrades += inc;
+      }
+    });
+    saveProgress();
+    applySavedProgressToTeams();
+    if(upgrades) {
+      if(typeof log === 'function') log(`🏅 Offseason progression: ${upgrades} skill points applied across players.`);
+    }
+  }
+  if(typeof window.simulateSeason === 'function'){
+    const origSimSeason = window.simulateSeason;
+    window.simulateSeason = function(){
+      const ret = origSimSeason.apply(this, arguments);
+      try { if(progression.settings.autoUpgradeOnSeasonEnd) autoUpgradeAfterSeason(); } catch(e){ console.warn(e); }
+      return ret;
+    };
+  } else {
+    window._ufs_progression_wait_for_season = true;
+  }
+
+  /* -------------------------
+     UI: progression panel + upgrade modal
+     ------------------------- */
+  const container = document.querySelector('.container') || document.body;
+  const uiWrap = document.createElement('div');
+  uiWrap.style.margin = '10px 0';
+  uiWrap.innerHTML = `
+    <div style="background:#071024;padding:10px;border-radius:6px;color:#dbeafe;display:flex;gap:12px;align-items:center;">
+      <div><strong>Progression</strong></div>
+      <div style="min-width:160px;">
+        Coins: <span id="ufs_coins">${progression.coins}</span>
+        &nbsp; | &nbsp; Auto-upgrade:
+        <input id="ufs_auto_upgrade" type="checkbox" ${progression.settings.autoUpgradeOnSeasonEnd ? 'checked' : ''} />
+      </div>
+      <div style="margin-left:auto;">
+        <button id="ufs_open_upgrades" style="padding:6px 10px;">Open Upgrade Panel</button>
+        <button id="ufs_save" style="padding:6px 10px;margin-left:6px;">Save</button>
+        <button id="ufs_load" style="padding:6px 10px;margin-left:6px;">Load</button>
+      </div>
+    </div>
+    <div id="ufs_upgrade_modal" class="hidden" style="position:fixed;left:50%;top:10%;transform:translateX(-50%);width:760px;max-height:72vh;overflow:auto;background:#081823;border:2px solid #0b5d7a;padding:12px;border-radius:8px;z-index:9999;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <strong style="color:#cfe3ff">Upgrade Players</strong>
+        <div><button id="ufs_close_modal" style="padding:6px 10px;">Close</button></div>
+      </div>
+      <div style="margin-top:8px;color:#cfe3ff">
+        <div style="margin-bottom:8px;">Upgrade cost: <span id="ufs_cost_display">${progression.settings.upgradeCostPerPoint}</span> coins / skill point.</div>
+        <div id="ufs_player_list" style="display:flex;flex-direction:column;gap:8px;"></div>
+      </div>
+    </div>
+  `;
+  container.insertBefore(uiWrap, container.firstChild);
+
+  function refreshProgressUI(){
+    // coins
+    const coinsEl = document.getElementById('ufs_coins');
+    if(coinsEl) coinsEl.textContent = progression.coins;
+
+    // if modal open, refresh player list
+    const modal = document.getElementById('ufs_upgrade_modal');
+    if(!modal || modal.classList.contains('hidden')) return;
+
+    const list = document.getElementById('ufs_player_list');
+    list.innerHTML = '';
+    // Show players grouped by team
+    if(!window.teams) return;
+    teams.forEach(team=>{
+      const teamBlock = document.createElement('div');
+      teamBlock.style.borderTop = '1px solid rgba(255,255,255,0.03)';
+      teamBlock.innerHTML = `<div style="font-weight:700;margin-top:6px;color:#dbeafe">${team.name}</div>`;
+      const pWrap = document.createElement('div');
+      pWrap.style.display='flex'; pWrap.style.flexWrap='wrap'; pWrap.style.gap='6px'; pWrap.style.marginTop='6px';
+      team.roster.forEach(p=>{
+        const rec = progression.players[p.id] || { skill:p.skill, potential:p.potential||99, xp:0, name:p.name };
+        const card = document.createElement('div');
+        card.style.background='#062231'; card.style.padding='8px'; card.style.borderRadius='6px'; card.style.minWidth='220px';
+        card.innerHTML = `
+          <div style="font-weight:700">${p.name} <span style="font-size:12px;color:#ffd700">[${p.position}]</span></div>
+          <div class="small" style="color:#bfe8ff">Skill: <span class="ufs_skill">${rec.skill}</span> / ${rec.potential}</div>
+          <div class="small" style="color:#bfe8ff">XP: <span class="ufs_xp">${rec.xp}</span></div>
+          <div style="margin-top:6px;display:flex;gap:6px;">
+            <button class="ufs_buy_one" data-id="${p.id}" style="padding:6px 8px">+1</button>
+            <button class="ufs_buy_five" data-id="${p.id}" style="padding:6px 8px">+5</button>
+            <button class="ufs_reset" data-id="${p.id}" style="padding:6px 8px">Reset</button>
+          </div>
+        `;
+        pWrap.appendChild(card);
+      });
+      teamBlock.appendChild(pWrap);
+      list.appendChild(teamBlock);
+    });
+
+    // attach handlers
+    document.querySelectorAll('.ufs_buy_one').forEach(btn=>{
+      btn.onclick = ()=>{ const id = btn.dataset.id; buySkill(id, 1); };
+    });
+    document.querySelectorAll('.ufs_buy_five').forEach(btn=>{
+      btn.onclick = ()=>{ const id = btn.dataset.id; buySkill(id, 5); };
+    });
+    document.querySelectorAll('.ufs_reset').forEach(btn=>{
+      btn.onclick = ()=>{ const id = btn.dataset.id; resetPlayerUpgrade(id); };
+    });
+  }
+
+  function buySkill(playerId, points){
+    const costPer = progression.settings.upgradeCostPerPoint;
+    const totalCost = costPer * points;
+    if(progression.coins < totalCost){ alert('Not enough coins'); return; }
+    // find player in teams
+    const p = findPlayerByIdOrName(playerId, progression.players[playerId] && progression.players[playerId].name);
+    if(!p){ alert('Player not found'); return; }
+    ensurePlayerRecord(p);
+    const rec = progression.players[playerId];
+    const available = (rec.potential || p.potential || 99) - rec.skill;
+    const buy = Math.min(points, available);
+    if(buy <= 0){ alert('Player is at potential or cannot be improved'); return; }
+    rec.skill += buy;
+    // also set p.skill so the game sees it immediately
+    p.skill = rec.skill;
+    progression.coins -= costPer * buy;
+    saveProgress();
+    refreshProgressUI();
+    if(typeof displayTeamList === 'function') displayTeamList();
+    if(typeof log === 'function') log(`🔧 Upgraded ${p.name} by ${buy} points (cost ${costPer * buy})`);
+  }
+
+  function resetPlayerUpgrade(playerId){
+    const p = findPlayerByIdOrName(playerId, progression.players[playerId] && progression.players[playerId].name);
+    if(!p){ alert('Player not found'); return; }
+    // Reset to baseline: if the stored progression record had original baseline, revert to that baseline value.
+    const rec = progression.players[playerId];
+    if(rec){
+      // For safety, reduce skill back to min(original saved skill, current)
+      p.skill = rec.skill; // rec.skill is authoritative here
+      if(typeof log === 'function') log(`♻️ Reset upgrades for ${p.name}`);
+    }
+    saveProgress(); refreshProgressUI(); if(typeof displayTeamList === 'function') displayTeamList();
+  }
+
+  // open/close handlers
+  document.getElementById('ufs_open_upgrades').addEventListener('click', ()=>{
+    const modal = document.getElementById('ufs_upgrade_modal');
+    modal.classList.remove('hidden'); refreshProgressUI();
+    // simple show
+  });
+  document.getElementById('ufs_close_modal').addEventListener('click', ()=>{
+    const modal = document.getElementById('ufs_upgrade_modal');
+    modal.classList.add('hidden');
+  });
+
+  // save/load buttons
+  document.getElementById('ufs_save').addEventListener('click', ()=>{ saveProgress(); alert('Progress saved.'); });
+  document.getElementById('ufs_load').addEventListener('click', ()=>{ loadProgress(); applySavedProgressToTeams(); refreshProgressUI(); alert('Progress loaded/applied.'); });
+
+  // auto-upgrade checkbox
+  document.getElementById('ufs_auto_upgrade').addEventListener('change', (e)=>{
+    progression.settings.autoUpgradeOnSeasonEnd = !!e.target.checked;
+    saveProgress();
+  });
+
+  /* -------------------------
+     Init: load saved progression, apply to teams; attach fallback hooks if some functions not yet present
+     ------------------------- */
+  loadProgress();
+
+  // try apply immediately
+  applySavedProgressToTeams();
+
+  // If populateTeamSelect exists, wrap it so that whenever teams UI is refreshed we re-apply saved progression (safe wrapper)
+  if(typeof populateTeamSelect === 'function' && !populateTeamSelect._ufsWrapped){
+    const orig = populateTeamSelect;
+    populateTeamSelect = function(){
+      orig.apply(this, arguments);
+      try { applySavedProgressToTeams(); } catch(e){ console.warn('ufs: applySavedProgress failed', e); }
+    };
+    populateTeamSelect._ufsWrapped = true;
+  }
+
+  // If displayTeamList exists, wrap it to re-apply saved progression after regeneration
+  if(typeof displayTeamList === 'function' && !displayTeamList._ufsWrapped){
+    const orig2 = displayTeamList;
+    displayTeamList = function(){
+      orig2.apply(this, arguments);
+      try { applySavedProgressToTeams(); } catch(e){ console.warn('ufs: applySavedProgress failed', e); }
+    };
+    displayTeamList._ufsWrapped = true;
+  }
+
+  // If applyYardsToHud was not present earlier but appears later, try to patch it once when available
+  const tryAttachDelayedPatcher = setInterval(()=>{
+    if(typeof window.applyYardsToHud === 'function' && window._ufs_progression_waiting_for_applyYards){
+      // perform the same wrapping as earlier
+      try{
+        const original = window.applyYardsToHud;
+        window.applyYardsToHud = function(yards, offenseTeam, defenseTeam, type){
+          try { original.apply(this, arguments); } finally {
+            try { awardXPToOffense(offenseTeam, yards, type); } catch(e){ console.warn(e); }
+          }
+        };
+        window._ufs_progression_waiting_for_applyYards = false;
+        console.log('ufs: attached to applyYardsToHud');
+      } catch(e){ console.warn('ufs: attach failed', e); }
+    }
+    if(typeof window.simulateSeason === 'function' && window._ufs_progress_wait_for_season){
+      try {
+        const orig = window.simulateSeason;
+        window.simulateSeason = function(){
+          const r = orig.apply(this, arguments);
+          try { if(progression.settings.autoUpgradeOnSeasonEnd) autoUpgradeAfterSeason(); } catch(e){ console.warn(e); }
+          return r;
+        };
+        window._ufs_progress_wait_for_season = false;
+        console.log('ufs: attached to simulateSeason');
+      } catch(e){ console.warn('ufs: attach simulateSeason failed', e); }
+    }
+    // if both attached, stop polling
+    if(!window._ufs_progression_waiting_for_applyYards && !window._ufs_progress_wait_for_season) clearInterval(tryAttachDelayedPatcher);
+  }, 1200);
+
+  // expose a few helper functions for advanced use
+  window.ufs = {
+    awardXPToOffense,
+    applySavedProgressToTeams,
+    saveProgress,
+    loadProgress,
+    getProgressionState: ()=> JSON.parse(JSON.stringify(progression)),
+    buySkill,
+    autoUpgradeAfterSeason
+  };
+
+  // initial UI refresh
+  refreshProgressUI();
+  if(typeof log === 'function') log('🛠️ Progression add-on loaded. Open Upgrade Panel to spend coins.');
+
+})();
+</script>
