@@ -1,0 +1,183 @@
+<!-- PERSISTENCE ADD-ON: paste AFTER your main <script> and after the progression add-on -->
+<script>
+(function(){
+  const SAVE_KEY = 'ufs_game_state_v1';
+  const AUTO_SAVE_INTERVAL_MS = 20000; // autosave every 20s when enabled
+
+  // create UI control
+  const container = document.querySelector('.container') || document.body;
+  const panel = document.createElement('div');
+  panel.style.background = '#081822';
+  panel.style.padding = '8px';
+  panel.style.borderRadius = '6px';
+  panel.style.margin = '10px 0';
+  panel.style.display = 'flex';
+  panel.style.gap = '8px';
+  panel.style.alignItems = 'center';
+  panel.innerHTML = `
+    <strong style="color:#cfe3ff;margin-right:8px">Save / Load</strong>
+    <button id="ufs_saveGame_btn" style="padding:6px 10px">Save</button>
+    <button id="ufs_loadGame_btn" style="padding:6px 10px">Load</button>
+    <label style="color:#bcd;margin-left:8px;">Autosave <input id="ufs_autosave_chk" type="checkbox"></label>
+    <button id="ufs_export_btn" style="padding:6px 10px;margin-left:auto">Export JSON</button>
+    <input id="ufs_import_file" type="file" accept=".json" style="margin-left:6px" />
+  `;
+  container.insertBefore(panel, container.firstChild);
+
+  const btnSave = document.getElementById('ufs_saveGame_btn');
+  const btnLoad = document.getElementById('ufs_loadGame_btn');
+  const chkAuto = document.getElementById('ufs_autosave_chk');
+  const btnExport = document.getElementById('ufs_export_btn');
+  const fileInput = document.getElementById('ufs_import_file');
+
+  // Compose the serializable state
+  function buildSaveState(){
+    try {
+      // Only include simple JSON-friendly fields
+      const state = {
+        meta: { createdAt: new Date().toISOString(), version: 'ufs_v1' },
+        teams: window.teams ? JSON.parse(JSON.stringify(window.teams)) : null,
+        hud: window.hud ? JSON.parse(JSON.stringify(window.hud)) : null,
+        // progression state (if the progression add-on exists, include its saved state)
+        progression: (window.ufs && typeof window.ufs.getProgressionState === 'function') ? window.ufs.getProgressionState() : null,
+        // optional: store timestamp / other minimal app state
+      };
+      return state;
+    } catch(e) {
+      console.error('ufs: buildSaveState failed', e);
+      return null;
+    }
+  }
+
+  // Apply loaded state into the live game (non-destructive)
+  function applyLoadedState(state){
+    if(!state) return;
+    if(state.teams && Array.isArray(state.teams)){
+      window.teams = state.teams;
+      if(typeof populateTeamSelect === 'function') { try { populateTeamSelect(); } catch(e){ console.warn('ufs: populateTeamSelect failed', e); } }
+      if(typeof displayTeamList === 'function') { try { displayTeamList(); } catch(e){ console.warn('ufs: displayTeamList failed', e); } }
+    }
+    if(state.hud && typeof state.hud === 'object'){
+      window.hud = Object.assign(window.hud || {}, state.hud);
+      if(typeof refreshHUD === 'function') { try { refreshHUD(); } catch(e){ console.warn('ufs: refreshHUD failed', e); } }
+    }
+    // re-apply progression if present
+    if(state.progression && window.ufs && typeof window.ufs.loadProgress === 'function' && typeof window.ufs.applySavedProgressToTeams === 'function'){
+      try {
+        // write progression to localStorage key used by progression add-on, then call its loader
+        try { localStorage.setItem('ufs_progression_v1', JSON.stringify(state.progression)); } catch(e){ console.warn('ufs: store progression failed', e); }
+        window.ufs.loadProgress && window.ufs.loadProgress();
+        window.ufs.applySavedProgressToTeams && window.ufs.applySavedProgressToTeams();
+      } catch(e){ console.warn('ufs: apply progression failed', e); }
+    }
+    // last UI refresh
+    if(typeof refreshHUD === 'function') try { refreshHUD(); } catch(e){}
+    if(typeof log === 'function') log('💾 Game state loaded.');
+  }
+
+  // Save to localStorage
+  function saveGame(){
+    const state = buildSaveState();
+    if(!state){ alert('Save failed: could not build game state.'); return; }
+    try {
+      localStorage.setItem(SAVE_KEY, JSON.stringify(state));
+      if(typeof log === 'function') log('💾 Game saved to localStorage.');
+      else console.log('ufs: game saved');
+    } catch(e){
+      console.error('ufs: saveGame failed', e);
+      alert('Save failed: localStorage error (quota?).');
+    }
+  }
+
+  // Load from localStorage
+  function loadGame(){
+    try {
+      const raw = localStorage.getItem(SAVE_KEY);
+      if(!raw){ alert('No saved game in localStorage.'); return; }
+      const parsed = JSON.parse(raw);
+      applyLoadedState(parsed);
+    } catch(e){
+      console.error('ufs: loadGame failed', e);
+      alert('Load failed: see console for error.');
+    }
+  }
+
+  // Export JSON for manual backup
+  function exportGame(){
+    const state = buildSaveState();
+    if(!state){ alert('Export failed'); return; }
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `ufs_save_${(new Date()).toISOString().slice(0,19).replace(/[:T]/g,'-')}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // Import JSON file and apply
+  fileInput.addEventListener('change', (ev)=>{
+    const f = ev.target.files[0];
+    if(!f) return;
+    const reader = new FileReader();
+    reader.onload = function(e){
+      try {
+        const parsed = JSON.parse(e.target.result);
+        // basic validation
+        if(!parsed || ( !parsed.teams && !parsed.hud )) {
+          alert('Invalid save JSON.');
+          return;
+        }
+        applyLoadedState(parsed);
+        // store into localStorage for future quick loads
+        try { localStorage.setItem(SAVE_KEY, JSON.stringify(parsed)); } catch(e){ console.warn('ufs: stash imported save failed', e); }
+        if(typeof log === 'function') log('📥 Save imported and applied.');
+      } catch(err){
+        console.error('ufs: import failed', err);
+        alert('Import failed: invalid JSON.');
+      }
+    };
+    reader.readAsText(f);
+    // reset input to allow re-uploading same file later
+    ev.target.value = '';
+  });
+
+  // Hook buttons
+  btnSave.addEventListener('click', saveGame);
+  btnLoad.addEventListener('click', loadGame);
+  btnExport.addEventListener('click', exportGame);
+
+  // Auto-save toggle
+  let autoSaveTimer = null;
+  chkAuto.addEventListener('change', (e)=>{
+    if(e.target.checked){
+      // start autosave
+      autoSaveTimer = setInterval(()=>{
+        try { saveGame(); } catch(e){ console.warn('ufs: autosave failed', e); }
+      }, AUTO_SAVE_INTERVAL_MS);
+      try { localStorage.setItem(SAVE_KEY + '_autosave', '1'); } catch(e){}
+      if(typeof log === 'function') log('🔁 Autosave enabled.');
+    } else {
+      if(autoSaveTimer) clearInterval(autoSaveTimer);
+      autoSaveTimer = null;
+      try { localStorage.removeItem(SAVE_KEY + '_autosave'); } catch(e){}
+      if(typeof log === 'function') log('🔁 Autosave disabled.');
+    }
+  });
+
+  // restore autosave checkbox from previous session
+  try {
+    const as = localStorage.getItem(SAVE_KEY + '_autosave');
+    if(as === '1'){ chkAuto.checked = true; chkAuto.dispatchEvent(new Event('change')); }
+  } catch(e){ /* ignore */ }
+
+  // Expose save/load on window for console use
+  window.ufsSaveGame = saveGame;
+  window.ufsLoadGame = loadGame;
+  window.ufsExportGame = exportGame;
+  window.ufsApplyLoadedState = applyLoadedState;
+
+  // brief hint
+  if(typeof log === 'function') log('🔒 Persistence add-on loaded. Use Save / Load / Export / Import controls at the top.');
+})();
+</script>
