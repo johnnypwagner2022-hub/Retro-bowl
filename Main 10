@@ -1,0 +1,96 @@
+<!-- INJURIES & FATIGUE ADD-ON -->
+<script>
+(function(){
+  const FATIGUE_INCREASE_PER_MATCH = 15;
+  const FATIGUE_RECOVERY_PER_REST = 20;
+  const MAX_FATIGUE = 100;
+  const INJURY_CHANCE = 0.05; // 5% chance per match per player
+  const INJURY_RECOVERY_MIN = 1; // in matches
+  const INJURY_RECOVERY_MAX = 3;
+
+  // Ensure every player has fatigue and injury properties
+  function initPlayers(){
+    if(!window.teams) return;
+    window.teams.forEach(team=>{
+      if(!team.players) return;
+      team.players.forEach(player=>{
+        if(player.fatigue == null) player.fatigue = 0;
+        if(player.injury == null) player.injury = 0; // 0 = healthy, >0 = matches remaining to heal
+      });
+    });
+  }
+
+  // Called after a match
+  function updatePlayerStatusAfterMatch(){
+    if(!window.teams) return;
+    window.teams.forEach(team=>{
+      if(!team.players) return;
+      team.players.forEach(player=>{
+        // Skip if already injured
+        if(player.injury > 0) return;
+        // Apply fatigue
+        player.fatigue = Math.min(MAX_FATIGUE, (player.fatigue || 0) + FATIGUE_INCREASE_PER_MATCH);
+        // Chance of injury
+        if(Math.random() < INJURY_CHANCE){
+          player.injury = Math.floor(Math.random() * (INJURY_RECOVERY_MAX - INJURY_RECOVERY_MIN + 1)) + INJURY_RECOVERY_MIN;
+        }
+      });
+    });
+  }
+
+  // Call this when a player rests or team rests
+  function recoverFatigueAndInjuries(){
+    if(!window.teams) return;
+    window.teams.forEach(team=>{
+      if(!team.players) return;
+      team.players.forEach(player=>{
+        // Recover fatigue
+        player.fatigue = Math.max(0, (player.fatigue || 0) - FATIGUE_RECOVERY_PER_REST);
+        // Recover injuries
+        if(player.injury > 0){
+          player.injury = Math.max(0, player.injury - 1);
+        }
+      });
+    });
+  }
+
+  // Display in team list or HUD
+  function appendFatigueInjuryInfo(player){
+    const fatigue = player.fatigue || 0;
+    const injury = player.injury || 0;
+    return `💪${fatigue}% ${injury>0?`🤕(${injury} match${injury>1?'es':''} left)`:''}`;
+  }
+
+  // Hook: modify displayTeamList if exists
+  if(typeof displayTeamList === 'function'){
+    const originalDisplayTeamList = displayTeamList;
+    displayTeamList = function(){
+      originalDisplayTeamList();
+      if(!window.teams) return;
+      // Append fatigue/injury to UI rows
+      window.teams.forEach(team=>{
+        if(!team.players) return;
+        team.players.forEach(player=>{
+          const el = document.querySelector(`#player_${player.id}`);
+          if(el){
+            let extra = appendFatigueInjuryInfo(player);
+            el.textContent = `${player.name} ${extra}`;
+          }
+        });
+      });
+    };
+  }
+
+  // Expose functions globally
+  window.ufsUpdatePlayerStatusAfterMatch = updatePlayerStatusAfterMatch;
+  window.ufsRecoverFatigueAndInjuries = recoverFatigueAndInjuries;
+  window.ufsAppendFatigueInjuryInfo = appendFatigueInjuryInfo;
+  window.ufsInitPlayersInjuryFatigue = initPlayers;
+
+  // Initialize
+  initPlayers();
+  if(typeof refreshHUD === 'function') refreshHUD();
+  if(typeof log === 'function') log('🤕 Injuries & Fatigue add-on loaded.');
+
+})();
+</script>
