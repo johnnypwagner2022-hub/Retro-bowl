@@ -1,0 +1,73 @@
+<!-- FATIGUE & SUBSTITUTIONS ADD-ON -->
+<script>
+(function(){
+  if(!window.teams) return;
+
+  // Initialize stamina for all players
+  function initFatigue(){
+    teams.forEach(team => {
+      team.roster.forEach(player => {
+        if(player.stamina === undefined) player.stamina = 100; // full stamina
+      });
+    });
+    console.log('💪 Player stamina initialized.');
+  }
+
+  // Apply fatigue after actions
+  function applyFatigue(player, amount){
+    player.stamina = clamp(player.stamina - amount, 0, 100);
+    // low stamina reduces morale slightly
+    if(player.stamina < 30 && window.ufsAdjustMorale) {
+      ufsAdjustMorale(player, -1);
+    }
+  }
+
+  // Get performance multiplier from stamina
+  function staminaModifier(player){
+    return clamp(0.7 + player.stamina/100 * 0.5, 0.7, 1.2); // 0.7x to 1.2x
+  }
+
+  // Example: apply stamina effect on throw
+  function modifyThrowByStamina(baseAccuracy, qb){
+    const mod = staminaModifier(qb);
+    if(window.ufsModifyThrowAccuracy) return ufsModifyThrowAccuracy(baseAccuracy, qb) * mod;
+    return baseAccuracy * mod;
+  }
+
+  // Substitution system
+  function substitutePlayer(team, outPlayer, inPlayer){
+    const idx = team.roster.indexOf(outPlayer);
+    if(idx !== -1){
+      team.roster[idx] = inPlayer;
+      console.log(`🔄 Substitution: ${outPlayer.name} out, ${inPlayer.name} in`);
+    }
+  }
+
+  // Example: auto-fatigue per play
+  function applyPlayFatigue(play){
+    if(!play || !play.offenseTeam || !play.defenseTeam) return;
+    // offense QB loses 1-3 stamina per play
+    const qb = play.offenseTeam.roster.find(p=>p.position==="QB");
+    if(qb) applyFatigue(qb, randInt(1,3));
+    // RB loses 2-5 per run
+    const rb = play.offenseTeam.roster.find(p=>p.position==="RB");
+    if(rb && play.type==="run") applyFatigue(rb, randInt(2,5));
+    // WR loses 1-4 per pass
+    const wrs = play.offenseTeam.roster.filter(p=>p.position==="WR");
+    wrs.forEach(wr => applyFatigue(wr, randInt(1,4)));
+    // defense loses 1-3 per play
+    play.defenseTeam.roster.forEach(p => applyFatigue(p, randInt(1,3)));
+  }
+
+  // Expose globally
+  window.ufsInitFatigue = initFatigue;
+  window.ufsApplyFatigue = applyFatigue;
+  window.ufsStaminaModifier = staminaModifier;
+  window.ufsModifyThrowByStamina = modifyThrowByStamina;
+  window.ufsSubstitutePlayer = substitutePlayer;
+  window.ufsApplyPlayFatigue = applyPlayFatigue;
+
+  // Auto-init
+  initFatigue();
+})();
+</script>
