@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Football Simulator Extended</title>
+<style>
+body { font-family: Arial, sans-serif; background:#0b3d91; color:#fff; text-align:center; }
+.container { max-width: 1000px; margin: 20px auto; background:#1a1a1a; padding:20px; border-radius:8px; }
+button { padding:10px 20px; margin:10px; font-size:16px; cursor:pointer; }
+.team { margin-bottom:20px; text-align:left; }
+.player { font-size:14px; }
+h1, h2, h3 { margin:10px 0; }
+#results { margin-top:20px; text-align:left; }
+</style>
+</head>
+<body>
+<div class="container">
+<h1>Football Simulator Extended</h1>
+
+<div id="teamContainer"></div>
+
+<button onclick="simulateSeason()">Simulate Season</button>
+<button onclick="simulateMultiYear(5)">Simulate 5 Years</button>
+<div id="results"></div>
+</div>
+
+<script>
+// ----- NFL TEAMS & POSITIONS -----
+const teamNames = [
+  "Cardinals","Falcons","Ravens","Bills","Panthers","Bears","Bengals","Browns",
+  "Cowboys","Broncos","Lions","Packers","Texans","Colts","Jaguars","Chiefs",
+  "Raiders","Chargers","Rams","Dolphins","Vikings","Patriots","Saints","Giants",
+  "Jets","Eagles","Steelers","49ers","Seahawks","Buccaneers","Titans","Commanders"
+];
+
+const positions = ["QB","RB","WR","TE","OL","DL","LB","CB","S","K","P"];
+const starChance = 0.05; // 5% chance for star player with higher skill
+const playerFirstNames = ["Tom","Aaron","Patrick","Dak","Julio","Travis","Davante","Derrick","Justin","Stefon","Christian","Lamar","Joe","Tyreek"];
+const playerLastNames = ["Smith","Jones","Hill","Adams","Brown","Cook","Allen","Thomas","Murray","Johnson","Watson","Mahomes","Ridley","Lockett"];
+
+let teams = [];
+
+// ----- TEAM GENERATION -----
+function generateTeams() {
+  teams = [];
+  teamNames.forEach(name => {
+    let players = [];
+    for (let i=0;i<11;i++) {
+      const first = playerFirstNames[Math.floor(Math.random()*playerFirstNames.length)];
+      const last = playerLastNames[Math.floor(Math.random()*playerLastNames.length)];
+      let skill = Math.floor(Math.random()*70)+30; // base 30-100
+      if(Math.random() < starChance) skill = Math.floor(Math.random()*30)+70; // star player 70-100
+      const position = positions[Math.floor(Math.random()*positions.length)];
+      players.push({ name:`${first} ${last}`, skill, position });
+    }
+    teams.push({ name, players, wins:0, losses:0 });
+  });
+}
+
+// ----- DISPLAY TEAMS -----
+function displayTeams() {
+  const container = document.getElementById("teamContainer");
+  container.innerHTML = "";
+  teams.forEach(team=>{
+    const div = document.createElement("div");
+    div.className = "team";
+    div.innerHTML = `<h2>${team.name}</h2>` +
+      team.players.map(p=>`<div class="player">${p.name} (${p.position}) - Skill: ${p.skill}</div>`).join("");
+    container.appendChild(div);
+  });
+}
+
+// ----- SIMULATION -----
+function simulateMatch(teamA, teamB) {
+  const scoreA = teamA.players.reduce((sum,p)=>sum+p.skill,0)+Math.floor(Math.random()*20);
+  const scoreB = teamB.players.reduce((sum,p)=>sum+p.skill,0)+Math.floor(Math.random()*20);
+  if(scoreA>scoreB){teamA.wins++; teamB.losses++;}
+  else{teamB.wins++; teamA.losses++;}
+  return { teamA:teamA.name, teamB:teamB.name, scoreA, scoreB };
+}
+
+function simulateSeason() {
+  generateTeams();
+  displayTeams();
+  let resultsDiv = document.getElementById("results");
+  resultsDiv.innerHTML = "<h2>Season Results</h2>";
+  teams.forEach(t=>{ t.wins=0; t.losses=0; });
+
+  // Regular season (each team plays each other once)
+  for(let i=0;i<teams.length;i++){
+    for(let j=i+1;j<teams.length;j++){
+      const match = simulateMatch(teams[i],teams[j]);
+      resultsDiv.innerHTML += `<p>${match.teamA} ${match.scoreA} - ${match.scoreB} ${match.teamB}</p>`;
+    }
+  }
+
+  // Playoffs: top 8 teams
+  const playoffs = [...teams].sort((a,b)=>b.wins-a.wins).slice(0,8);
+  resultsDiv.innerHTML += "<h3>Playoffs:</h3>";
+  while(playoffs.length>1){
+    let nextRound = [];
+    for(let i=0;i<playoffs.length;i+=2){
+      const m = simulateMatch(playoffs[i],playoffs[i+1]);
+      resultsDiv.innerHTML += `<p>${m.teamA} ${m.scoreA} - ${m.scoreB} ${m.teamB}</p>`;
+      nextRound.push(m.scoreA>m.scoreB ? playoffs[i] : playoffs[i+1]);
+    }
+    playoffs.length=0; playoffs.push(...nextRound);
+  }
+  resultsDiv.innerHTML += `<h3>Super Bowl Winner: ${playoffs[0].name}</h3>`;
+
+  // Draft & retirements: replace 1 random player per team
+  teams.forEach(team=>{
+    const index = Math.floor(Math.random()*team.players.length);
+    const first = playerFirstNames[Math.floor(Math.random()*playerFirstNames.length)];
+    const last = playerLastNames[Math.floor(Math.random()*playerLastNames.length)];
+    let skill = Math.floor(Math.random()*70)+30;
+    if(Math.random()<starChance) skill = Math.floor(Math.random()*30)+70;
+    const position = positions[Math.floor(Math.random()*positions.length)];
+    team.players[index] = { name:`${first} ${last}`, skill, position };
+  });
+
+  displayTeams();
+}
+
+// Multi-year simulation
+function simulateMultiYear(years){
+  for(let y=1;y<=years;y++){
+    const resultsDiv = document.getElementById("results");
+    resultsDiv.innerHTML += `<h2>Season ${y}</h2>`;
+    simulateSeason();
+  }
+}
+
+// Initial display
+generateTeams();
+displayTeams();
+</script>
+</body>
+</html>
