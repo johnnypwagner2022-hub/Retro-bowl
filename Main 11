@@ -1,0 +1,103 @@
+<!-- TRAINING & SKILL PROGRESSION ADD-ON -->
+<script>
+(function(){
+  const TRAINING_GAIN_MIN = 2;
+  const TRAINING_GAIN_MAX = 5;
+  const TRAINING_FATIGUE_COST = 10;
+  const MAX_SKILL = 100;
+  const TRAINING_COOLDOWN = 1; // in matches
+
+  function initTraining(){
+    if(!window.teams) return;
+    window.teams.forEach(team=>{
+      if(!team.players) return;
+      team.players.forEach(player=>{
+        if(!player.skills) player.skills = {}; // e.g., {attack:50, defense:50}
+        if(!player.lastTraining) player.lastTraining = {}; // track cooldown per skill
+      });
+    });
+  }
+
+  // Train a specific skill
+  function trainPlayerSkill(player, skillName){
+    if(!player.skills) player.skills = {};
+    if(!player.lastTraining) player.lastTraining = {};
+    if(player.injury > 0){
+      console.warn(`${player.name} is injured and cannot train.`);
+      return;
+    }
+    if(player.fatigue + TRAINING_FATIGUE_COST > 100){
+      console.warn(`${player.name} is too fatigued to train.`);
+      return;
+    }
+    const last = player.lastTraining[skillName] || 0;
+    if(last > 0){
+      console.warn(`${player.name} must wait ${last} more match(es) before training ${skillName}.`);
+      return;
+    }
+    // Gain random skill
+    const gain = Math.floor(Math.random() * (TRAINING_GAIN_MAX - TRAINING_GAIN_MIN + 1)) + TRAINING_GAIN_MIN;
+    player.skills[skillName] = Math.min(MAX_SKILL, (player.skills[skillName] || 0) + gain);
+    // Increase fatigue
+    player.fatigue = Math.min(100, (player.fatigue || 0) + TRAINING_FATIGUE_COST);
+    // Set cooldown
+    player.lastTraining[skillName] = TRAINING_COOLDOWN;
+    console.log(`${player.name} trained ${skillName} +${gain}.`);
+  }
+
+  // Call after each match to reduce training cooldowns
+  function reduceTrainingCooldowns(){
+    if(!window.teams) return;
+    window.teams.forEach(team=>{
+      if(!team.players) return;
+      team.players.forEach(player=>{
+        if(!player.lastTraining) return;
+        Object.keys(player.lastTraining).forEach(skill=>{
+          if(player.lastTraining[skill] > 0) player.lastTraining[skill] -= 1;
+        });
+      });
+    });
+  }
+
+  // Display skills in UI
+  function appendPlayerSkillsInfo(player){
+    if(!player.skills) return '';
+    let info = '';
+    for(const skill in player.skills){
+      info += `⚡${skill}:${player.skills[skill]} `;
+    }
+    return info.trim();
+  }
+
+  // Hook: modify displayTeamList if exists
+  if(typeof displayTeamList === 'function'){
+    const originalDisplayTeamList = displayTeamList;
+    displayTeamList = function(){
+      originalDisplayTeamList();
+      if(!window.teams) return;
+      window.teams.forEach(team=>{
+        if(!team.players) return;
+        team.players.forEach(player=>{
+          const el = document.querySelector(`#player_${player.id}`);
+          if(el){
+            const skillInfo = appendPlayerSkillsInfo(player);
+            el.textContent += ` ${skillInfo}`;
+          }
+        });
+      });
+    };
+  }
+
+  // Expose globally
+  window.ufsTrainPlayerSkill = trainPlayerSkill;
+  window.ufsReduceTrainingCooldowns = reduceTrainingCooldowns;
+  window.ufsAppendPlayerSkillsInfo = appendPlayerSkillsInfo;
+  window.ufsInitTraining = initTraining;
+
+  // Initialize
+  initTraining();
+  if(typeof refreshHUD === 'function') refreshHUD();
+  if(typeof log === 'function') log('💪 Training & Skill Progression add-on loaded.');
+
+})();
+</script>
