@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Ultimate Football Simulator — Interactive Field Add-on</title>
+<meta name="viewport" content="width=device-width,initial-scale=1.0" />
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; background:#0b3d91; color:#fff; margin:0; padding:20px; }
+  .container { max-width:1100px; margin: auto; background:#1a1a1a; padding:16px; border-radius:10px; }
+  h1 { margin:0 0 10px 0; }
+  .row { display:flex; gap:12px; align-items:flex-start; }
+  #leftCol { flex:1 1 650px; }
+  #rightCol { width:380px; flex:0 0 380px; }
+  canvas { background: linear-gradient(#0b6b1a, #2aa05c); display:block; border:3px solid #0b3d91; border-radius:6px; width:100%; height:auto; }
+  .controls { margin-top:8px; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  button { padding:10px 14px; font-size:15px; cursor:pointer; border-radius:6px; border:0; background:#2e6cff; color:#fff; }
+  button:active { transform:translateY(1px); }
+  .meter { width:180px; height:18px; background:#333; border-radius:9px; overflow:hidden; }
+  .meterFill { height:100%; width:0%; background:linear-gradient(#ffd24d,#ff8a00); transition:width 0.05s linear; }
+  .label { font-size:14px; color:#ddd; }
+  #log { background:#0f1720; color:#dbeafe; padding:8px; border-radius:6px; height:220px; overflow:auto; font-size:13px; }
+  .stats { background:#0f1720; padding:10px; border-radius:6px; font-size:14px; }
+  .receiverStar { color: #ffd700; font-size:12px; margin-left:6px; }
+  select { padding:8px 6px; border-radius:6px; }
+  .small { font-size:13px; color:#ccc; }
+  label { display:block; margin-bottom:6px; color:#ddd; }
+  .hud { display:flex; gap:12px; align-items:center; margin-bottom:8px; }
+  .hudBox { background:#071024; padding:8px 10px; border-radius:6px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Ultimate Football Simulator — Interactive Field</h1>
+
+  <div class="row">
+    <div id="leftCol">
+      <canvas id="fieldCanvas" width="900" height="500"></canvas>
+
+      <div class="controls">
+        <div>
+          <label class="label">Choose Team</label>
+          <select id="selectTeam"></select>
+        </div>
+
+        <div>
+          <label class="label">Mode</label>
+          <select id="modeSelect">
+            <option value="offense">You on Offense (interactive)</option>
+            <option value="defense">You on Defense (auto-sim)</option>
+          </select>
+        </div>
+
+        <div class="hud">
+          <div class="hudBox"><strong id="hudScore">0 - 0</strong><div class="small" id="hudTeams">—</div></div>
+          <div class="hudBox">Down: <span id="hudDown">1</span></div>
+          <div class="hudBox">Ball: <span id="hudYard">25</span> yd</div>
+        </div>
+      </div>
+
+      <div class="controls" style="align-items:center;">
+        <button id="startPlayBtn">Start Play</button>
+        <button id="runBtn">Click RB to Run</button>
+
+        <div>
+          <label class="label">Hold to Throw</label>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <button id="throwBtn">Hold & Release to Throw</button>
+            <div class="meter"><div id="throwMeter" class="meterFill"></div></div>
+            <div class="small" id="throwPct">0%</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="rightCol">
+      <div class="stats">
+        <div><strong>Game Log</strong></div>
+        <div id="log"></div>
+      </div>
+
+      <div style="height:12px;"></div>
+
+      <div class="stats">
+        <div><strong>Selected Target</strong></div>
+        <div id="selectedInfo">None</div>
+        <div style="height:8px;"></div>
+        <div><strong>Play Settings</strong></div>
+        <div class="small">QB accuracy and max throw increase with charge. Holding too long risks sack.</div>
+        <div style="height:8px;"></div>
+        <div><strong>Receiver Stars:</strong></div>
+        <div class="small">Stars are based on receiver skill (higher is better catch chance).</div>
+      </div>
+
+    </div>
+  </div>
+
+  <div style="height:12px;"></div>
+
+  <div class="row">
+    <div style="flex:1">
+      <div class="small">Tip: Click a WR on the field to target. When you hold the Throw button, a meter charges. Release to throw. Click the RB then Start Play to run.</div>
+    </div>
+  </div>
+
+  <div style="height:12px;"></div>
+
+  <!-- Existing simulation area summary (keeps compatibility) -->
+  <div id="simSummary" class="small"></div>
+</div>
+
+<script>
+/* ==========================================================================
+   Integrated Simulator + Interactive Field Add-on
+   - Keeps compatibility with teams[] used by season sim
+   - Includes: hold-to-throw, receiver highlighting + stars, RB run, linemen & sack
+   - Defense mode is auto-sim (user does not interact)
+   ========================================================================== */
+
+/* ---------------------------
+   Utility & Basic Simulator Data
+   --------------------------- */
+const positions = ["QB","RB","WR","TE","OL","DL","LB","CB","S","K","P"];
+const teamNames = [
+  "Cardinals","Falcons","Ravens","Bills","Panthers","Bears","Bengals","Browns",
+  "Cowboys","Broncos","Lions","Packers","Texans","Colts","Jaguars","Chiefs",
+  "Raiders","Chargers","Rams","Dolphins","Vikings","Patriots","Saints","Giants",
+  "Jets","Eagles","Steelers","49ers","Seahawks","Buccaneers","Titans","Commanders"
+];
+const playerFirstNames = ["Tom","Aaron","Patrick","Dak","Julio","Travis","Davante","Derrick","Justin","Stefon","Christian","Lamar","Joe","Tyreek","Cooper","CeeDee","Nick"];
+const playerLastNames = ["Smith","Jones","Hill","Adams","Brown","Cook","Allen","Thomas","Murray","Johnson","Watson","Mahomes","Ridley","Lockett","Kelley","Hopkins","Edwards"];
+
+let teams = []; // will be generated (keeps compatibility)
+
+/* small helper */
+function randInt(a,b){ return Math.floor(Math.random()*(b-a+1))+a; }
+function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+
+/* ---------------------------
+   Team / roster generation (compatible with your simulator)
+   - ensure each team has at least 1 QB, 1 RB, 3 WR, and 5 OL, some DL/LB/CB/S
+   --------------------------- */
+function generateTeams() {
+  teams = [];
+  const starChance = 0.06;
+  teamNames.forEach(teamName=>{
+    let roster = [];
+    // ensure key positions
+    const add = (pos, count) => {
+      for(let i=0;i<count;i++){
+        const first = playerFirstNames[randInt(0,playerFirstNames.length-1)];
+        const last = playerLastNames[randInt(0,playerLastNames.length-1)];
+        let skill = randInt(40,85);
+        if(Math.random() < starChance) skill = randInt(80,99);
+        const potential = clamp(skill + randInt(0,12), 40, 99);
+        roster.push({ name:`${first} ${last}`, position:pos, skill, potential, id:Math.random().toString(36).slice(2) });
+      }
+    };
+
+    add("QB",1);
+    add("RB",2);
+    add("WR",4);
+    add("TE",1);
+    add("OL",5);
+    add("DL",4);
+    add("LB",4);
+    add("CB",4);
+    add("S",2);
+    add("K",1);
+    add("P",1);
+
+    // trim or shuffle to reasonable size, but keep richness
+    teams.push({ name: teamName, roster, wins:0, losses:0 });
+  });
+}
+
+/* ---------------------------
+   Rendering field + players (canvas)
+   --------------------------- */
+const canvas = document.getElementById("fieldCanvas");
+const ctx = canvas.getContext("2d");
+const FIELD_W = canvas.width;
+const FIELD_H = canvas.height;
+
+function drawField() {
+  // clear
+  ctx.clearRect(0,0,FIELD_W,FIELD_H);
+
+  // turf gradient background (already via CSS), draw yard lines
+  ctx.strokeStyle = "rgba(255,255,255,0.18)";
+  ctx.lineWidth = 2;
+  const yards = 10;
+  for(let i=0;i<=10;i++){
+    const x = 60 + (FIELD_W-120) * (i/10);
+    ctx.beginPath();
+    ctx.moveTo(x, 20);
+    ctx.lineTo(x, FIELD_H-20);
+    ctx.stroke();
+    ctx.font = "12px Arial";
+    ctx.fillStyle = "rgba(255,255,255,0.6)";
+    // label every other
+    if(i%2===0) ctx.fillText(`${i*10}`, x-10, 15);
+  }
+}
+
+/* Player drawing + interactive positions
+   We'll position offense left→right:
+   - QB near x=140
+   - OL near x=220
+   - WR spread right
+   - Defense mirrored positions
+*/
+let currentPlay = null;
+function buildPlayPositions(offenseTeam, defenseTeam) {
+  // returns object with arrays: offensePlayers, defensePlayers with x,y,ref to player
+  const off = [], def = [];
+  const startX = 120;
+  const midX = FIELD_W / 2;
+  // offense lineup
+  // place OL
+  const olX = startX + 120;
+  const olYBase = FIELD_H/2 - 60;
+  const olPlayers = offenseTeam.roster.filter(p=>p.position==="OL").slice(0,5);
+  for(let i=0;i<5;i++){
+    const p = olPlayers[i] || offenseTeam.roster.find(x=>x.position==="OL") || offenseTeam.roster[i];
+    off.push({ player:p, x:olX, y: olYBase + i*30, role:"OL" });
+  }
+  // QB behind OL
+  const qb = offenseTeam.roster.find(p=>p.position==="QB") || offenseTeam.roster[0];
+  off.push({ player:qb, x: olX - 80, y: FIELD_H/2, role:"QB" });
+
+  // RB behind QB
+  const rbs = offenseTeam.roster.filter(p=>p.position==="RB");
+  const rb = rbs[0] || offenseTeam.roster.find(p=>p.position==="RB") || offenseTeam.roster[1];
+  off.push({ player:rb, x: olX - 110, y: FIELD_H/2 + 40, role:"RB" });
+
+  // WRs curve out to the right
+  const wrs = offenseTeam.roster.filter(p=>p.position==="WR").slice(0,4);
+  for(let i=0;i<wrs.length;i++){
+    off.push({ player:wrs[i], x: olX + 140 + i*90, y: 100 + i*80, role:"WR" });
+  }
+  // TE near OL
+  const te = offenseTeam.roster.find(p=>p.position==="TE");
+  if(te) off.push({ player:te, x: olX + 60, y: FIELD_H/2 + 90, role:"TE" });
+
+  // Defense lineup roughly mirrored
+  const dlX = olX + 40;
+  const dlPlayers = defenseTeam.roster.filter(p=>p.position==="DL").slice(0,4);
+  for(let i=0;i<4;i++){
+    const p = dlPlayers[i] || defenseTeam.roster[i];
+    def.push({ player:p, x: dlX + 40, y: FIELD_H/2 - 60 + i*30, role:"DL" });
+  }
+  const lbs = defenseTeam.roster.filter(p=>p.position==="LB").slice(0,4);
+  for(let i=0;i<lbs.length;i++){
+    def.push({ player:lbs[i], x: dlX + 120, y: 120 + i*70, role:"LB" });
+  }
+  // CB and S near WRs
+  const cbs = defenseTeam.roster.filter(p=>p.position==="CB").slice(0,4);
+  for(let i=0;i<cbs.length;i++){
+    def.push({ player:cbs[i], x: olX + 160 + i*90, y: 100 + i*80, role:"CB" });
+  }
+  // Safeties
+  const ss = defenseTeam.roster.filter(p=>p.position==="S").slice(0,2);
+  if(ss[0]) def.push({ player:ss[0], x: olX + 240, y: FIELD_H/2 + 120, role:"S" });
+  if(ss[1]) def.push({ player:ss[1], x: olX + 240, y: FIELD_H/2 - 120, role:"S" });
+
+  return { offense:off, defense:def };
+}
+
+/* Draw players to canvas and highlight receivers */
+let lastMouse = {x:0,y:0};
+let receiverRects = []; // clickable receiver hitboxes
+function drawPlayersOnCanvas(playPositions, selectedTargetId) {
+  drawField();
+  receiverRects = [];
+
+  // draw defense first (so offense on top visually)
+  playPositions.defense.forEach(obj=>{
+    const {x,y,player,role} = obj;
+    // defender color
+    ctx.fillStyle = "#b33";
+    ctx.beginPath();
+    ctx.arc(x,y,12,0,Math.PI*2);
+    ctx.fill();
+    ctx.font="11px Arial"; ctx.fillStyle="#fff"; ctx.fillText(player.name.split(" ")[1]||"", x-14, y+26);
+  });
+
+  // draw offense players
+  playPositions.offense.forEach(obj=>{
+    const {x,y,player,role} = obj;
+    // choose color by role
+    let col = "#0a84ff"; // default
+    if(role==="QB") col="#ffd24d";
+    if(role==="RB") col="#ff8a00";
+    if(role==="WR"||role==="TE") col="#9af59a"; // highlight receivers in greenish
+
+    // circle
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.arc(x,y,14,0,Math.PI*2);
+    ctx.fill();
+
+    // name label
+    ctx.font="11px Arial"; ctx.fillStyle="#001f3f"; ctx.fillText(player.name.split(" ")[0]||"", x-18, y+28);
+
+    // stars for WR/TE
+    if(role==="WR" || role==="TE"){
+      const stars = calcStars(player.skill);
+      ctx.font="12px Arial";
+      ctx.fillStyle="#ffd700";
+      for(let s=0;s<stars;s++){
+        ctx.fillText("★", x-8 + s*8, y-22);
+      }
+      // create hitbox for clicking
+      receiverRects.push({ x:x-18, y:y-18, w:36, h:36, id:player.id, obj });
+      // highlight if selected
+      if(selectedTargetId === player.id){
+        ctx.strokeStyle = "rgba(255,255,255,0.95)";
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(x,y,20,0,Math.PI*2); ctx.stroke();
+      }
+    }
+
+    // small position text
+    ctx.font="11px Arial"; ctx.fillStyle="#fff";
+    ctx.fillText(`${role}`, x-10, y-34);
+  });
+
+  // if ball exists -> draw it
+  if(currentPlay && currentPlay.ball){
+    ctx.fillStyle = "#fff";
+    ctx.beginPath();
+    ctx.arc(currentPlay.ball.x, currentPlay.ball.y, 8, 0, Math.PI*2);
+    ctx.fill();
+  }
+}
+
+/* calc stars from skill */
+function calcStars(skill){
+  // 0-19 -> 1 star, 20-39 -> 2, ... cap 5
+  let s = Math.ceil(skill / 20);
+  s = clamp(s,1,5);
+  return s;
+}
+
+/* ---------------------------
+   Interactive Play State & Logic
+   --------------------------- */
+let selectedTeamIndex = 0;
+let playPositions = null;
+let selectedReceiverId = null;
+let meterFill = 0;
+const MAX_CHARGE = 2000; // ms to full charge
+let chargeStart = null;
+let chargeInterval = null;
+let isCharging = false;
+let playActive = false;
+let mode = "offense"; // offense or defense
+let hud = { scoreA:0, scoreB:0, teamA:'—', teamB:'—', yard:25, down:1 };
+
+/* Setup UI elements */
+const selectTeamEl = document.getElementById("selectTeam");
+const modeSelectEl = document.getElementById("modeSelect");
+const startPlayBtn = document.getElementById("startPlayBtn");
+const runBtn = document.getElementById("runBtn");
+const throwBtn = document.getElementById("throwBtn");
+const throwMeterEl = document.getElementById("throwMeter");
+const throwPctEl = document.getElementById("throwPct");
+const logDiv = document.getElementById("log");
+const hudScore = document.getElementById("hudScore");
+const hudTeamsEl = document.getElementById("hudTeams");
+const hudYard = document.getElementById("hudYard");
+const hudDown = document.getElementById("hudDown");
+const selectedInfo = document.getElementById("selectedInfo");
+const simSummary = document.getElementById("simSummary");
+
+/* Populate team dropdown */
+function populateTeamSelect() {
+  selectTeamEl.innerHTML = "";
+  teams.forEach((t,i)=>{
+    const opt = document.createElement("option");
+    opt.value = i; opt.textContent = t.name;
+    selectTeamEl.appendChild(opt);
+  });
+}
+modeSelectEl.addEventListener('change',()=>{ mode = modeSelectEl.value; log(`Mode set to ${mode}`); });
+
+/* Logging helper */
+function log(msg){ const p = document.createElement("div"); p.innerHTML = msg; logDiv.prepend(p); }
+
+/* Start a play (sets positions, resets state) */
+function startPlay() {
+  if(playActive){ log("Play already active. End current play first."); return; }
+  selectedTeamIndex = parseInt(selectTeamEl.value||0,10);
+  const offenseIndex = selectedTeamIndex;
+  // random opponent
+  let defIndex;
+  do { defIndex = randInt(0, teams.length-1); } while(defIndex === offenseIndex);
+  const offenseTeam = teams[offenseIndex];
+  const defenseTeam = teams[defIndex];
+
+  // HUD update
+  hud.teamA = offenseTeam.name; hud.teamB = defenseTeam.name;
+  hud.scoreA = hud.scoreA || 0; hud.scoreB = hud.scoreB || 0;
+  hudYard.textContent = hud.yard;
+  hudDown.textContent = hud.down;
+
+  playPositions = buildPlayPositions(offenseTeam, defenseTeam);
+  selectedReceiverId = null;
+  currentPlay = { offenseTeam, defenseTeam, startedAt:Date.now(), ball:null, state:"ready" };
+
+  drawPlayersOnCanvas(playPositions, selectedReceiverId);
+  playActive = true;
+  log(`New play started: ${offenseTeam.name} (offense) vs ${defenseTeam.name}`);
+
+  // If mode is defense (user on defense) we will simulate the entire play automatically
+  if(mode === 'defense'){
+    setTimeout(()=> { simulateAIPlay(offenseTeam, defenseTeam); }, 350);
+  }
+}
+
+/* Simulate AI play (used when user is on defense or when you want fast sim) */
+function simulateAIPlay(offTeam, defTeam) {
+  // pick play: pass or run based on some random
+  const playType = (Math.random() < 0.6) ? 'pass' : 'run';
+  log(`<i>AI chooses to ${playType}</i>`);
+  if(playType === 'run') {
+    // simulate simple run yardage based on RB and OL vs defenders
+    const rb = offTeam.roster.find(p=>p.position==="RB");
+    const olStrength = avgSkill(offTeam.roster.filter(p=>p.position==="OL"));
+    const dlStrength = avgSkill(defTeam.roster.filter(p=>p.position==="DL"));
+    const yards = Math.round(clamp((rb.skill*0.25 + olStrength*0.5 - dlStrength*0.4) + randInt(0,8), -2, 60));
+    log(`AI run gain: ${yards} yards`);
+    updateAfterPlay(offTeam, defTeam, yards, playType);
+  } else {
+    // pass simulation: choose a top WR
+    const wrs = offTeam.roster.filter(p=>p.position==="WR").sort((a,b)=>b.skill-a.skill);
+    const target = wrs[0] || offTeam.roster[0];
+    const qb = offTeam.roster.find(p=>p.position==="QB");
+    const catchChance = clamp( (target.skill*0.5 + qb.skill*0.4) / 100 + 0.1 - Math.random()*0.2, 0, 1);
+    if(Math.random() < catchChance){
+      const yards = randInt(6,25);
+      log(`AI pass complete to ${target.name} for ${yards} yards`);
+      updateAfterPlay(offTeam, defTeam, yards, 'pass');
+    } else {
+      const intercepted = Math.random() < 0.08;
+      if(intercepted){
+        log(`AI pass intercepted!`);
+        updateAfterPlay(offTeam, defTeam, -999, 'interception');
+      } else {
+        log(`AI pass incomplete.`);
+        updateAfterPlay(offTeam, defTeam, 0, 'incomplete');
+      }
+    }
+  }
+}
+
+/* Helper to compute avg skill */
+function avgSkill(arr){ if(!arr || arr.length===0) return 50; return Math.round(arr.reduce((s,p)=>s+p.skill,0)/arr.length); }
+
+/* run a user-run play (click RB then Start Play mode) */
+let runInProgress = false;
+function startRunPlay(){
+  if(!playActive){ log("Start a play first (Start Play)"); return; }
+  if(mode === 'defense'){ log("In defense mode plays are simulated."); return; }
+  if(runInProgress) return;
+  runInProgress = true;
+  // find RB and defenders
+  const rbObj = playPositions.offense.find(o=>o.role==="RB");
+  const defenders = playPositions.defense.slice();
+  let steps = 0;
+  log(`Running play started with ${rbObj.player.name}`);
+  const runInterval = setInterval(()=>{
+    steps++;
+    // advance RB to right roughly
+    rbObj.x += 6 + (rbObj.player.skill/30); // speed depends on RB skill
+    // defenders move toward RB
+    defenders.forEach(d=>{
+      const dx = rbObj.x - d.x;
+      const dy = rbObj.y - d.y;
+      // move closer
+      d.x += clamp(dx/30, -4, 4) + (Math.random()-0.5)*1.5;
+      d.y += clamp(dy/30, -3, 3) + (Math.random()-0.5)*1.2;
+    });
+
+    // check tackle: if any defender within distance threshold, block check with OL vs DL & RB strength
+    const tackle = defenders.find(d=> Math.hypot(d.x - rbObj.x, d.y - rbObj.y) < 22 );
+    if(tackle){
+      // blocking effect: avg OL vs DL
+      const ol = avgSkill(playPositions.offense.filter(o=>o.role==="OL").map(x=>x.player));
+      const dl = avgSkill(playPositions.defense.filter(o=>o.role==="DL").map(x=>x.player));
+      const blockFactor = (ol - dl) / 100; // positive favors offense
+      const tackleChance = clamp(0.5 - blockFactor + (50 - rbObj.player.skill)/200, 0.05, 0.95);
+      if(Math.random() < tackleChance){
+        // tackled
+        const yards = Math.round((rbObj.x - 130) / 6);
+        log(`RB ${rbObj.player.name} tackled after ${yards} yards`);
+        clearInterval(runInterval);
+        runInProgress = false; playActive = false;
+        updateAfterPlay(currentPlay.offenseTeam, currentPlay.defenseTeam, yards, 'run');
+        drawPlayersOnCanvas(playPositions);
+        return;
+      } else {
+        // broken tackle -> continue
+        log(`Broken tackle by ${rbObj.player.name}!`);
+        // give small boost
+        rbObj.x += 10;
+      }
+    }
+
+    // touchdown if cross right edge
+    if(rbObj.x > FIELD_W - 60){
+      const yards = Math.round((rbObj.x - 130) / 6);
+      log(`Touchdown! RB ${rbObj.player.name} scored for ${yards} yards`);
+      clearInterval(runInterval);
+      runInProgress = false; playActive = false;
+      updateAfterPlay(currentPlay.offenseTeam, currentPlay.defenseTeam, 99, 'td');
+      drawPlayersOnCanvas(playPositions);
+      return;
+    }
+
+    drawPlayersOnCanvas(playPositions, selectedReceiverId);
+  }, 80);
+}
+
+/* Hold-to-throw mechanics */
+function startCharge() {
+  if(!playActive){ log("Start a play first."); return; }
+  if(mode === 'defense'){ log("In defense mode plays are simulated."); return; }
+  if(isCharging) return;
+  chargeStart = Date.now();
+  isCharging = true;
+  throwMeterEl.style.width = "0%";
+  chargeInterval = setInterval(()=>{
+    const dt = Date.now() - chargeStart;
+    const pct = clamp(dt / MAX_CHARGE, 0, 1);
+    throwMeterEl.style.width = `${Math.round(pct*100)}%`;
+    throwPctEl.textContent = `${Math.round(pct*100)}%`;
+    meterFill = pct;
+    // sack check while charging: defenders attempt to shed blocks
+    const ol = avgSkill(playPositions.offense.filter(o=>o.role==="OL").map(x=>x.player));
+    const dl = avgSkill(playPositions.defense.filter(o=>o.role==="DL").map(x=>x.player));
+    // sack probability increases with time and if DL > OL
+    const holdFactor = dt / MAX_CHARGE; // 0..1
+    const baseSackProb = clamp((dl - ol)/200 + holdFactor*0.45, 0, 0.9);
+    if(Math.random() < baseSackProb * 0.03){ // small chance per tick
+      // sack happens
+      clearInterval(chargeInterval);
+      isCharging = false;
+      meterFill = 0;
+      throwMeterEl.style.width = "0%";
+      throwPctEl.textContent = `0%`;
+      playActive = false;
+      log(`<strong>QB SACKED!</strong> Defensive line broke through.`);
+      updateAfterPlay(currentPlay.offenseTeam, currentPlay.defenseTeam, -6, 'sack');
+      return;
+    }
+    // safety stop if full
+    if(dt >= MAX_CHARGE){
+      // keep at max but don't auto-throw
+    }
+  }, 60);
+}
+
+function releaseChargeAndThrow() {
+  if(!isCharging) return;
+  clearInterval(chargeInterval);
+  isCharging = false;
+  const chargeMS = clamp(Date.now() - chargeStart, 0, MAX_CHARGE);
+  const chargePct = clamp(chargeMS / MAX_CHARGE, 0, 1);
+  meterFill = chargePct;
+  throwMeterEl.style.width = `${Math.round(chargePct*100)}%`;
+  throwPctEl.textContent = `${Math.round(chargePct*100)}%`;
+
+  // must have a selectedReceiverId to throw to
+  if(!selectedReceiverId){
+    log("No receiver selected! Click a WR on the field to select a target.");
+    return;
+  }
+  // create ball and animate towards target
+  const qbObj = playPositions.offense.find(o=>o.role==="QB");
+  const targetObj = playPositions.offense.find(o=> o.player.id === selectedReceiverId);
+  if(!qbObj || !targetObj){ log("Invalid QB or target."); return; }
+
+  // compute max throw distance from QB skill & charge
+  const qbSkill = qbObj.player.skill;
+  const maxThrowDistance = 220 + qbSkill; // px
+  // desired distance = distance between QB and target
+  const dx = targetObj.x - qbObj.x;
+  const dy = targetObj.y - qbObj.y;
+  const dist = Math.hypot(dx,dy);
+  // actual travel distance scaled by chargePct
+  const travel = clamp(dist, 0, maxThrowDistance * chargePct + 40);
+
+  // accuracy: higher chargePct and higher QB skill increases accuracy; defenders nearby reduce it
+  const defenderPressure = avgSkill(playPositions.defense.filter(d=> Math.hypot(d.x - qbObj.x, d.y - qbObj.y) < 80).map(x=>x.player));
+  const accuracyBase = (qbSkill/120) * (0.5 + chargePct*0.5);
+  const accuracy = clamp(accuracyBase - (defenderPressure/400) + (Math.random()-0.5)*0.08, 0, 1);
+
+  // ball object
+  currentPlay.ball = { x: qbObj.x, y: qbObj.y, targetX: targetObj.x, targetY: targetObj.y, speed: 6 + chargePct*8, travelDist: dist, accuracy, targetObj };
+  currentPlay.state = "ball_in_air";
+
+  // animate
+  const steps = [];
+  const dxUnit = (targetObj.x - qbObj.x);
+  const dyUnit = (targetObj.y - qbObj.y);
+  const totalFrames = Math.max(12, Math.round(dist / (currentPlay.ball.speed)));
+  let frame = 0;
+
+  const ballInterval = setInterval(()=>{
+    frame++;
+    // linear interpolation
+    const t = frame/totalFrames;
+    // some inaccuracy offset
+    const offsetMag = (1 - accuracy) * 30; // up to 30 px error if low accuracy
+    const offX = (Math.random()-0.5) * offsetMag;
+    const offY = (Math.random()-0.5) * offsetMag;
+    currentPlay.ball.x = qbObj.x + dxUnit * t + offX;
+    currentPlay.ball.y = qbObj.y + dyUnit * t + offY;
+    drawPlayersOnCanvas(playPositions, selectedReceiverId);
+
+    // if near target -> evaluate catch
+    if(Math.hypot(currentPlay.ball.x - targetObj.x, currentPlay.ball.y - targetObj.y) < 18 || frame >= totalFrames+6){
+      clearInterval(ballInterval);
+      // catch chance based on receiver skill, QB accuracy, and nearby defender
+      const rec = targetObj.player;
+      const recSkill = rec.skill;
+      // check defender closeness to receiver
+      const nearestDef = playPositions.defense.reduce((best,d)=> {
+        const dd = Math.hypot(d.x - targetObj.x, d.y - targetObj.y);
+        return dd < best.dist ? {dist:dd, d} : best;
+      }, {dist:9999, d:null});
+      let defFactor = 0;
+      if(nearestDef.d){
+        defFactor = clamp((100 - nearestDef.d.player.skill) / 200, 0, 0.6); // better defender reduces catch chance
+      }
+      const catchProb = clamp( (recSkill/120) + (currentPlay.ball.accuracy*0.35) - defFactor + 0.05, 0, 0.98 );
+      const caught = Math.random() < catchProb;
+      if(caught){
+        // gain yards proportional to how far target is from LOS
+        const gained = Math.round(dist/8) + randInt(0,8);
+        log(`<strong>Pass caught by ${rec.name} for ${gained} yards.</strong>`);
+        currentPlay.ball = null;
+        playActive = false;
+        updateAfterPlay(currentPlay.offenseTeam, currentPlay.defenseTeam, gained, 'pass');
+        drawPlayersOnCanvas(playPositions);
+      } else {
+        // chance of interception based on poor accuracy and nearby defender
+        const interProb = clamp(0.04 + (1 - currentPlay.ball.accuracy) * 0.15 + (nearestDef.dist < 28 ? 0.12 : 0), 0, 0.6);
+        if(Math.random() < interProb){
+          log(`<strong>Intercepted!</strong>`);
+          currentPlay.ball = null;
+          playActive = false;
+          updateAfterPlay(currentPlay.offenseTeam, currentPlay.defenseTeam, -999, 'interception');
+          drawPlayersOnCanvas(playPositions);
+        } else {
+          log(`Pass incomplete to ${rec.name}.`);
+          currentPlay.ball = null;
+          playActive = false;
+          updateAfterPlay(currentPlay.offenseTeam, currentPlay.defenseTeam, 0, 'incomplete');
+          drawPlayersOnCanvas(playPositions);
+        }
+      }
+    }
+  }, 40);
+}
+
+/* Update after play bookkeeping (yards can be negative for sacks) */
+function updateAfterPlay(offTeam, defTeam, yards, type){
+  // type: run, pass, td, sack, interception, incomplete
+  // simple scoring: touchdown if yards >= 99 (in our run code) or if scoreboard yard crosses goal
+  if(type === 'td' || yards >= 99){
+    // award 7 points to offense
+    log(`<strong>${offTeam.name} TD!</strong>`);
+    // tally HUD: we'll add to hud.scoreA for simplicity (ASSUMES selected team is hud.teamA)
+    hud.scoreA += 7;
+  } else if(type === 'sack'){
+    log(`<strong>Sack!</strong>`);
+    hud.scoreB += 0; // nothing special now
+  } else if(type === 'interception'){
+    log(`<strong>Turnover - interception.</strong>`);
+    // no score, but next actions could be different
+  } else if(type === 'pass' || type === 'run'){
+    // yard gain applied to field position
+  } else if(type === 'incomplete'){
+    // no yards
+  }
+
+  // approximate: if yards > 40 treat as big gain
+  if(yards > 0 && yards < 99){
+    log(`${offTeam.name} gained ${yards} yards.`);
+    // update HUD yard
+    hud.yard += yards;
+    if(hud.yard >= 100){ // touchdown
+      hud.scoreA += 7;
+      hud.yard = 25;
+      hud.down = 1;
+    }
+  } else if(yards < 0 && yards > -100){
+    // sack negative yards
+    hud.yard = Math.max(1, hud.yard + yards);
+  } else if(yards === 0){
+    // no change
+  } else if(yards === -999){
+    // intercepted - turnover, set yard to opponent
+    hud.yard = 75;
+  }
+
+  // simple down logic
+  hud.down = hud.down + 1;
+  if(hud.down > 4){ hud.down = 1; hud.yard = 25; } // reset for demo
+  refreshHUD();
+}
+
+/* Refresh HUD */
+function refreshHUD(){
+  hudScore.textContent = `${hud.scoreA} - ${hud.scoreB}`;
+  hudTeamsEl.textContent = `${hud.teamA} vs ${hud.teamB}`;
+  hudYard.textContent = hud.yard;
+  hudDown.textContent = hud.down;
+}
+
+/* Canvas click handler to select receiver */
+canvas.addEventListener('click', (e)=>{
+  if(!playPositions) return;
+  const rect = canvas.getBoundingClientRect();
+  const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
+  const my = (e.clientY - rect.top) * (canvas.height / rect.height);
+  for(const r of receiverRects){
+    if(mx >= r.x && mx <= r.x + r.w && my >= r.y && my <= r.y + r.h){
+      selectedReceiverId = r.id;
+      selectedInfo.innerHTML = `${r.obj.player.name} (${r.obj.player.position}) — Skill: ${r.obj.player.skill} <span class="receiverStar">${"★".repeat(calcStars(r.obj.player.skill))}</span>`;
+      drawPlayersOnCanvas(playPositions, selectedReceiverId);
+      log(`Target selected: ${r.obj.player.name}`);
+      return;
+    }
+  }
+});
+
+/* UI binding */
+startPlayBtn.addEventListener('click', ()=> startPlay());
+runBtn.addEventListener('click', ()=> startRunPlay());
+
+/* Throw button mousedown / touchstart / mouseup */
+function chargeStartHandler(e){ e.preventDefault(); startCharge(); }
+function chargeEndHandler(e){ e.preventDefault(); releaseChargeAndThrow(); }
+throwBtn.addEventListener('mousedown', chargeStartHandler);
+throwBtn.addEventListener('touchstart', chargeStartHandler);
+document.addEventListener('mouseup', chargeEndHandler);
+document.addEventListener('touchend', chargeEndHandler);
+
+/* Populate team select initially after generate */
+function initAll(){
+  generateTeams();
+  populateTeamSelect();
+  // show quick sim summary
+  simSummary.innerHTML = `Generated ${teams.length} teams. Click Start Play to try the interactive field.`;
+  // initial HUD reset
+  hud.scoreA = 0; hud.scoreB = 0; hud.yard = 25; hud.down = 1;
+  refreshHUD();
+}
+initAll();
+
+/* redraw loop to keep canvas crisp on resize & maintain visuals */
+setInterval(()=> {
+  if(playPositions) drawPlayersOnCanvas(playPositions, selectedReceiverId);
+}, 120);
+
+</script>
+</body>
+</html>
