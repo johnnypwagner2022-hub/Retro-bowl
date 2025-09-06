@@ -1,0 +1,106 @@
+<!-- Add this inside your existing <div class="container"> -->
+<div id="playGameContainer" style="margin-top:30px;">
+  <h2>Play a Game</h2>
+  <label for="selectTeam">Choose Your Team:</label>
+  <select id="selectTeam"></select>
+  <button onclick="startPlayGame()">Start Game</button>
+
+  <div id="playGameArea" style="display:none; margin-top:20px;">
+    <h3 id="playGameScore">0 - 0</h3>
+    <p>Time left: <span id="playGameClock">10</span> plays</p>
+    <button onclick="runPlay('run')">Run</button>
+    <button onclick="runPlay('pass')">Pass</button>
+    <button onclick="runPlay('kick')">Kick Field Goal</button>
+    <div id="playGameLog" style="margin-top:10px; text-align:left;"></div>
+  </div>
+</div>
+
+<script>
+// ---- PLAYABLE GAME ADD-ON ----
+let playerTeam = null;
+let opponentTeam = null;
+let playClock = 10;
+let playerScore = 0;
+let opponentScore = 0;
+
+function populateTeamSelect() {
+  const select = document.getElementById("selectTeam");
+  select.innerHTML = "";
+  teams.forEach((t,i)=>{
+    const opt = document.createElement("option");
+    opt.value = i;
+    opt.textContent = t.name;
+    select.appendChild(opt);
+  });
+}
+
+populateTeamSelect();
+
+function startPlayGame() {
+  const teamIndex = document.getElementById("selectTeam").value;
+  playerTeam = teams[teamIndex];
+  
+  // Random opponent
+  let opponentIndex;
+  do { opponentIndex = Math.floor(Math.random()*teams.length); } while(opponentIndex == teamIndex);
+  opponentTeam = teams[opponentIndex];
+  
+  playClock = 10;
+  playerScore = 0;
+  opponentScore = 0;
+  
+  document.getElementById("playGameArea").style.display = "block";
+  document.getElementById("playGameScore").textContent = `${playerScore} - ${opponentScore}`;
+  document.getElementById("playGameClock").textContent = playClock;
+  document.getElementById("playGameLog").innerHTML = `<p>Game started! ${playerTeam.name} vs ${opponentTeam.name}</p>`;
+}
+
+function runPlay(type) {
+  if(playClock <= 0) return alert("Game over! Start a new game.");
+  
+  // Simple outcome based on team skill
+  const playerSkillSum = playerTeam.players.reduce((sum,p)=>sum+p.skill,0);
+  const opponentSkillSum = opponentTeam.players.reduce((sum,p)=>sum+p.skill,0);
+  const randFactor = Math.random()*20;
+  
+  let log = "";
+  if(type === 'run') {
+    if(playerSkillSum + randFactor > opponentSkillSum) {
+      playerScore += 7;
+      log = `Touchdown! ${playerTeam.name} scored a run.`;
+    } else {
+      log = `${playerTeam.name} run stopped by ${opponentTeam.name}.`;
+    }
+  } else if(type === 'pass') {
+    if(playerSkillSum + randFactor*1.2 > opponentSkillSum) {
+      playerScore += 7;
+      log = `Touchdown! ${playerTeam.name} scored a pass.`;
+    } else {
+      log = `Pass incomplete or intercepted by ${opponentTeam.name}.`;
+    }
+  } else if(type === 'kick') {
+    if(Math.random()*100 < 50 + (playerSkillSum - opponentSkillSum)/5) {
+      playerScore += 3;
+      log = `Field goal is good! ${playerTeam.name} +3 points.`;
+    } else {
+      log = `Field goal missed by ${playerTeam.name}.`;
+    }
+  }
+  
+  // Opponent turn (simple random scoring)
+  if(Math.random()*playerSkillSum < opponentSkillSum/2){
+    opponentScore += 7;
+    log += `<br>${opponentTeam.name} scored a touchdown!`;
+  }
+  
+  playClock--;
+  document.getElementById("playGameScore").textContent = `${playerScore} - ${opponentScore}`;
+  document.getElementById("playGameClock").textContent = playClock;
+  const logDiv = document.getElementById("playGameLog");
+  logDiv.innerHTML = `<p>${log}</p>` + logDiv.innerHTML;
+  
+  if(playClock <= 0){
+    logDiv.innerHTML = `<p><strong>Game Over!</strong> Final Score: ${playerTeam.name} ${playerScore} - ${opponentScore} ${opponentTeam.name}</p>` + logDiv.innerHTML;
+  }
+}
+</script>
